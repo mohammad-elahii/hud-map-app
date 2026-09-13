@@ -1,4 +1,4 @@
-package com.example.hudmapapp.ui.screens
+package com.example.hudmapapp.ui.screens.splashScreen
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -14,8 +14,8 @@ fun SplashScreen(
     LaunchedEffect(Unit) {
         delay(2000L)
 
-        navController.navigate(AppRoute.Home) {
-            popUpTo(AppRoute.Home) {
+        navController.navigate(AppRoute.Introduction1) {
+            popUpTo(AppRoute.Introduction1) {
                 inclusive = true
             }
         }

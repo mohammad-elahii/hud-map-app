@@ -9,7 +9,13 @@ sealed class AppRoute {
     object Splash : AppRoute()
 
     @Serializable
-    object Introduction : AppRoute()
+    object Introduction1 : AppRoute()
+
+    @Serializable
+    object Introduction2 : AppRoute()
+
+    @Serializable
+    object Introduction3 : AppRoute()
 
     @Serializable
     object Home : AppRoute()
