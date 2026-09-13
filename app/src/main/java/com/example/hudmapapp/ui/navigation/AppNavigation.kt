@@ -4,11 +4,13 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.hudmapapp.ui.screens.HUDScreen
-import com.example.hudmapapp.ui.screens.HomeScreen
-import com.example.hudmapapp.ui.screens.IntroductionScreen
-import com.example.hudmapapp.ui.screens.SettingsScreen
-import com.example.hudmapapp.ui.screens.SplashScreen
+import com.example.hudmapapp.ui.screens.hudScreen.HUDScreen
+import com.example.hudmapapp.ui.screens.homeScreen.HomeScreen
+import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen1
+import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen2
+import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen3
+import com.example.hudmapapp.ui.screens.settingScreen.SettingsScreen
+import com.example.hudmapapp.ui.screens.splashScreen.SplashScreen
 
 @Composable
 fun AppNavigation() {
@@ -26,8 +28,20 @@ fun AppNavigation() {
             )
         }
 
-        composable<AppRoute.Introduction> {
-            IntroductionScreen(
+        composable<AppRoute.Introduction1> {
+            IntroductionScreen1(
+                navController = navController
+            )
+        }
+
+        composable<AppRoute.Introduction2> {
+            IntroductionScreen2(
+                navController = navController
+            )
+        }
+
+        composable<AppRoute.Introduction3> {
+            IntroductionScreen3(
                 navController = navController
             )
         }

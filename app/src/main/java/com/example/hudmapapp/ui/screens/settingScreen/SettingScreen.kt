@@ -1,10 +1,10 @@
-package com.example.hudmapapp.ui.screens
+package com.example.hudmapapp.ui.screens.settingScreen
 
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavController
 
 @Composable
-fun HUDScreen(
+fun SettingsScreen(
     navController: NavController
 ) {
 }

@@ -1,4 +1,4 @@
-package com.example.hudmapapp.ui.screens
+package com.example.hudmapapp.ui.screens.splashScreen
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
