@@ -57,7 +57,7 @@ fun HomeScreen(
                     .align(Alignment.TopCenter)
                     .fillMaxWidth(),
                 onSettingsClick = {
-                    navController.navigate(AppRoute.Settings)
+                    navController.navigate(AppRoute.HUD)
                 }
             )
 
