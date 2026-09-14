@@ -1,5 +1,6 @@
 package com.example.hudmapapp.ui.screens.hudScreen
 
+import android.util.Log
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
@@ -41,15 +44,23 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.MainGradient
+
+private const val TAG = "HUDScreen"
 
 /**
  * Distraction-free HUD navigation display.
  *
  * Everything here is currently mocked/static:
  * no GPS, sensors, or route calculation.
+ *
+ * The actual navigation visuals live in [HUDNavigationLayer] so that
+ * [MirroredHUDScreen] (issue #18) can reuse the exact same content,
+ * flipped, instead of duplicating it.
  */
 @Composable
 fun HUDScreen(
@@ -61,26 +72,46 @@ fun HUDScreen(
             .background(Color.Black)
     ) {
 
-        IconButton(
+        HUDNavigationLayer(modifier = Modifier.fillMaxSize())
+
+        HUDIconButton(
+            icon = Icons.Filled.Close,
+            contentDescription = "Exit HUD, return to Home",
             onClick = {
-                navController.popBackStack()
+                Log.d(TAG, "Close button clicked — popping back stack")
+                val popped = navController.popBackStack()
+                Log.d(TAG, "popBackStack() returned $popped")
             },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(20.dp)
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(
-                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f)
-                )
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = "Exit HUD, return to Home",
-                tint = MaterialTheme.colorScheme.tertiary
-            )
-        }
+        )
 
+        // Entry point into the mirrored presentation (issue #18). Kept as a
+        // plain, unmirrored text pill so it never has to be second-guessed
+        // as part of the navigation instruction itself.
+        MirrorEntryButton(
+            onClick = {
+                Log.d(TAG, "Mirror button clicked — attempting navigate(AppRoute.MirroredHUD)")
+                try {
+                    navController.navigate(AppRoute.MirroredHUD)
+                    Log.d(TAG, "navigate(AppRoute.MirroredHUD) call completed without throwing")
+                } catch (e: Exception) {
+                    Log.e(TAG, "navigate(AppRoute.MirroredHUD) failed", e)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(20.dp)
+        )
+    }
+}
+
+@Composable
+internal fun HUDNavigationLayer(
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
         Column(
             modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -279,6 +310,48 @@ private fun DrawScope.drawCarGlyph(
             size.width * 0.76f,
             size.height - wheelRadius * 0.6f
         )
+    )
+}
+
+/** Shared circular icon button style used for both HUD screens' exit controls. */
+@Composable
+internal fun HUDIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(
+                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f)
+            )
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = MaterialTheme.colorScheme.tertiary
+        )
+    }
+}
+
+@Composable
+private fun MirrorEntryButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = "Mirror",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.tertiary,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     )
 }
 

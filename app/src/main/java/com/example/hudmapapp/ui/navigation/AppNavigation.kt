@@ -6,6 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.ui.screens.hudScreen.HUDScreen
 import com.example.hudmapapp.ui.screens.homeScreen.HomeScreen
+import com.example.hudmapapp.ui.screens.hudScreen.MirroredHUDScreen
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen1
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen2
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen3
@@ -54,6 +55,12 @@ fun AppNavigation() {
 
         composable<AppRoute.HUD> {
             HUDScreen(
+                navController = navController
+            )
+        }
+
+        composable<AppRoute.MirroredHUD>{
+            MirroredHUDScreen(
                 navController = navController
             )
         }
