@@ -1,44 +1,91 @@
 package com.example.hudmapapp.location
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
-import android.location.LocationManager
-import androidx.core.content.ContextCompat
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 /**
- * Represents the different states of location permission.
+ * Represents the comprehensive state of location acquisition,
+ * including success, waiting, and error conditions.
  */
-sealed class LocationPermissionState {
+sealed class LocationState {
 
-    data object NotRequested : LocationPermissionState()
+    /** Location permission has not been granted yet. */
+    data object PermissionRequired : LocationState()
 
-    data object Granted : LocationPermissionState()
+    /** Permission granted but device location services are disabled. */
+    data object ServicesDisabled : LocationState()
 
-    data object Denied : LocationPermissionState()
+    /** Permission granted and services on, but waiting for the first fix. */
+    data object WaitingForFix : LocationState()
 
-    data object PermanentlyDenied : LocationPermissionState()
+    /** A valid location is available. */
+    data class Available(val location: AppLocation) : LocationState()
+
+    /** Location fix was lost (e.g. moved indoors, signal lost). */
+    data object Unavailable : LocationState()
+
+    /** The location provider encountered an error. */
+    data class Error(val message: String) : LocationState()
+
+    /** No network connection — map tiles cannot load. */
+    data object NetworkUnavailable : LocationState()
 }
 
-fun hasLocationPermission(context: Context): Boolean {
-    val fineGranted = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
+/**
+ * Classifies the reason the user cannot use location features right now.
+ * Used to drive the overlay UI.
+ */
+sealed class LocationBlockReason {
 
-    val coarseGranted = ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_COARSE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
+    /** Permission not granted. */
+    data object PermissionDenied : LocationBlockReason()
+
+    /** Permission permanently denied. */
+    data object PermissionPermanentlyDenied : LocationBlockReason()
+
+    /** Device location services are off. */
+    data object GpsDisabled : LocationBlockReason()
+}
+
+/**
+ * Checks if location permission is granted.
+ */
+fun hasLocationPermission(context: android.content.Context): Boolean {
+    val fineGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+        context, android.Manifest.permission.ACCESS_FINE_LOCATION
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    val coarseGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+        context, android.Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     return fineGranted || coarseGranted
 }
 
-fun isLocationEnabled(context: Context): Boolean {
-    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-    return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+/**
+ * Checks if GPS / location providers are enabled on the device.
+ */
+fun isLocationEnabled(context: android.content.Context): Boolean {
+    val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+    return locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+            locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
 }
 
+/**
+ * Checks if the device has an active network connection.
+ */
+fun isNetworkAvailable(context: Context): Boolean {
+    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val network = cm.activeNetwork ?: return false
+    val capabilities = cm.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+/**
+ * The location permissions to request, in order of preference.
+ */
 val LOCATION_PERMISSIONS = arrayOf(
-    Manifest.permission.ACCESS_FINE_LOCATION,
-    Manifest.permission.ACCESS_COARSE_LOCATION
+    android.Manifest.permission.ACCESS_FINE_LOCATION,
+    android.Manifest.permission.ACCESS_COARSE_LOCATION
 )

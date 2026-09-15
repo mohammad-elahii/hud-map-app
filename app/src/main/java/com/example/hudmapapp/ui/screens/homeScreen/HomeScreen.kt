@@ -45,22 +45,29 @@ import com.example.hudmapapp.location.AppLocation
 import com.example.hudmapapp.location.FusedLocationProvider
 import com.example.hudmapapp.location.LocationBlockReason
 import com.example.hudmapapp.location.LocationPermissionHandler
-import com.example.hudmapapp.location.LocationPermissionOverlay
+import com.example.hudmapapp.location.LocationState
+import com.example.hudmapapp.location.LocationStatusBanner
+import com.example.hudmapapp.location.LocationBlockOverlay
 import com.example.hudmapapp.location.LocationProvider
 import com.example.hudmapapp.location.hasLocationPermission
 import com.example.hudmapapp.location.isLocationEnabled
+import com.example.hudmapapp.location.isNetworkAvailable
 import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.DeepPurple30
 
 @Composable
 fun HomeScreen(
     navController: NavController,
-    map: @Composable (AppLocation?, Int) -> Unit = { loc, trigger -> HomeMapView(currentLocation = loc, recenterTrigger = trigger) }
+    map: @Composable (AppLocation?, Int) -> Unit = { loc, trigger ->
+        HomeMapView(currentLocation = loc, recenterTrigger = trigger)
+    }
 ) {
     val context = LocalContext.current
 
     var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
+    var dismissBanner by remember { mutableStateOf(false) }
+    var networkAvailable by remember { mutableStateOf(isNetworkAvailable(context)) }
 
     val locationProvider: LocationProvider = remember {
         FusedLocationProvider(context.applicationContext)
@@ -68,6 +75,8 @@ fun HomeScreen(
 
     val currentLocation by locationProvider.locationUpdates
         .collectAsState(initial = null)
+
+    val locationState by locationProvider.locationState.collectAsState()
 
     var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
 
@@ -88,16 +97,25 @@ fun HomeScreen(
         context.startActivity(intent)
     }
 
+    fun retryLocation() {
+        dismissBanner = false
+        networkAvailable = isNetworkAvailable(context)
+        if (hasPermission && isLocationEnabled(context) && networkAvailable) {
+            locationProvider.startUpdates()
+        }
+    }
+
     LocationPermissionHandler(
         onPermissionGranted = {
             hasPermission = true
             if (!isLocationEnabled(context)) {
                 overlayReason = LocationBlockReason.GpsDisabled
+            } else {
+                locationProvider.startUpdates()
             }
         }
     ) { permGranted, permissionActions ->
 
-        // Keep hasPermission in sync
         LaunchedEffect(permGranted) { hasPermission = permGranted }
 
         Scaffold { innerPadding ->
@@ -156,8 +174,43 @@ fun HomeScreen(
                     )
                 }
 
+                // Location status banner (non-blocking, shown at bottom)
+                if (!dismissBanner && permGranted && isLocationEnabled(context)) {
+                    // Determine the effective state to show
+                    val bannerState = if (!networkAvailable) {
+                        LocationState.NetworkUnavailable
+                    } else {
+                        locationState
+                    }
+
+                    when (bannerState) {
+                        is LocationState.WaitingForFix,
+                        is LocationState.Unavailable,
+                        is LocationState.Error,
+                        is LocationState.NetworkUnavailable -> {
+                            LocationStatusBanner(
+                                state = bannerState,
+                                onRetry = {
+                                    dismissBanner = false
+                                    networkAvailable = isNetworkAvailable(context)
+                                    if (hasPermission && isLocationEnabled(context) && networkAvailable) {
+                                        locationProvider.startUpdates()
+                                    }
+                                },
+                                onOpenSettings = { openLocationSettings() },
+                                onDismiss = { dismissBanner = true },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                            )
+                        }
+                        else -> { /* no banner needed */ }
+                    }
+                }
+
+                // Blocking overlay for permission / GPS disabled
                 if (overlayReason != null) {
-                    LocationPermissionOverlay(
+                    LocationBlockOverlay(
                         reason = overlayReason!!,
                         onRequestPermission = {
                             overlayReason = null
@@ -255,4 +308,12 @@ private fun MapControlButton(
             tint = colors.surface
         )
     }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun HomeScreenPreview() {
+    HomeScreen(
+        navController = rememberNavController()
+    )
 }

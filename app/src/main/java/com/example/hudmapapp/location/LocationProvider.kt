@@ -1,6 +1,7 @@
 package com.example.hudmapapp.location
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Abstraction for obtaining device location.
@@ -16,6 +17,12 @@ interface LocationProvider {
      * acquisition fails permanently.
      */
     val locationUpdates: Flow<AppLocation>
+
+    /**
+     * A [StateFlow] that reflects the current location acquisition state,
+     * including errors and waiting conditions.
+     */
+    val locationState: StateFlow<LocationState>
 
     /**
      * Returns the last known location, or `null` if no fix is available.
