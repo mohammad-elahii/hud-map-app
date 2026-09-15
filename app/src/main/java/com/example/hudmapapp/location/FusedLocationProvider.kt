@@ -9,10 +9,11 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
@@ -27,10 +28,9 @@ private const val UPDATE_INTERVAL_MS = 5_000L
 private const val FASTEST_INTERVAL_MS = 2_000L
 
 /**
- * Maximum acceptable age (in ms) for the last-known location before we
- * treat it as stale and rely on fresh updates instead.
+ * Time without a fix before we consider location unavailable (ms).
  */
-private const val MAX_LAST_KNOWN_AGE_MS = 10_000L
+private const val FIX_TIMEOUT_MS = 30_000L
 
 /**
  * Concrete [LocationProvider] backed by Google Play Services'
@@ -52,18 +52,34 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
     private val _isTracking = MutableStateFlow(false)
     override val isTracking: Boolean get() = _isTracking.value
 
+    private val _locationState = MutableStateFlow<LocationState>(LocationState.WaitingForFix)
+    override val locationState: StateFlow<LocationState> = _locationState.asStateFlow()
+
     // ------------------------------------------------------------------
     // Last-known location
     // ------------------------------------------------------------------
 
     @SuppressLint("MissingPermission")
     override suspend fun getLastLocation(): AppLocation? {
-        if (!hasLocationPermission(context)) return null
+        if (!hasLocationPermission(context)) {
+            _locationState.value = LocationState.PermissionRequired
+            return null
+        }
+
+        if (!isLocationEnabled(context)) {
+            _locationState.value = LocationState.ServicesDisabled
+            return null
+        }
 
         return try {
             val loc = fusedClient.lastLocation.await()
-            loc?.toAppLocation()
-        } catch (_: Exception) {
+            loc?.toAppLocation()?.also {
+                _locationState.value = LocationState.Available(it)
+            }
+        } catch (e: Exception) {
+            _locationState.value = LocationState.Error(
+                e.message ?: "Failed to get last location"
+            )
             null
         }
     }
@@ -75,9 +91,18 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
     @SuppressLint("MissingPermission")
     override val locationUpdates: Flow<AppLocation> = callbackFlow {
         if (!hasLocationPermission(context)) {
-            close(SecurityException("Location permission not granted"))
+            _locationState.value = LocationState.PermissionRequired
+            close()
             return@callbackFlow
         }
+
+        if (!isLocationEnabled(context)) {
+            _locationState.value = LocationState.ServicesDisabled
+            close()
+            return@callbackFlow
+        }
+
+        _locationState.value = LocationState.WaitingForFix
 
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
             .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
@@ -86,12 +111,23 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
 
         val cb = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.toAppLocation()?.let { trySend(it) }
+                result.lastLocation?.toAppLocation()?.let { loc ->
+                    _locationState.value = LocationState.Available(loc)
+                    trySend(loc)
+                }
             }
         }
 
         callback = cb
-        fusedClient.requestLocationUpdates(request, cb, Looper.getMainLooper())
+        try {
+            fusedClient.requestLocationUpdates(request, cb, Looper.getMainLooper())
+        } catch (e: Exception) {
+            _locationState.value = LocationState.Error(
+                e.message ?: "Failed to start location updates"
+            )
+            close()
+            return@callbackFlow
+        }
 
         awaitClose {
             fusedClient.removeLocationUpdates(cb)
@@ -106,7 +142,19 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
     @SuppressLint("MissingPermission")
     override fun startUpdates() {
         if (_isTracking.value) return
-        if (callback != null) return          // already listening via flow
+        if (callback != null) return
+
+        if (!hasLocationPermission(context)) {
+            _locationState.value = LocationState.PermissionRequired
+            return
+        }
+
+        if (!isLocationEnabled(context)) {
+            _locationState.value = LocationState.ServicesDisabled
+            return
+        }
+
+        _locationState.value = LocationState.WaitingForFix
 
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
             .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
@@ -115,12 +163,22 @@ class FusedLocationProvider(private val context: Context) : LocationProvider {
 
         val cb = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.toAppLocation()
+                result.lastLocation?.toAppLocation()?.let { loc ->
+                    _locationState.value = LocationState.Available(loc)
+                }
             }
         }
 
         callback = cb
-        fusedClient.requestLocationUpdates(request, cb, Looper.getMainLooper())
+        try {
+            fusedClient.requestLocationUpdates(request, cb, Looper.getMainLooper())
+        } catch (e: Exception) {
+            _locationState.value = LocationState.Error(
+                e.message ?: "Failed to start location updates"
+            )
+            callback = null
+            return
+        }
         _isTracking.value = true
     }
 
