@@ -24,7 +24,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,9 +41,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.location.FusedLocationProvider
 import com.example.hudmapapp.location.LocationBlockReason
 import com.example.hudmapapp.location.LocationPermissionHandler
 import com.example.hudmapapp.location.LocationPermissionOverlay
+import com.example.hudmapapp.location.LocationProvider
+import com.example.hudmapapp.location.hasLocationPermission
 import com.example.hudmapapp.location.isLocationEnabled
 import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.DeepPurple30
@@ -47,10 +55,33 @@ import com.example.hudmapapp.ui.theme.DeepPurple30
 @Composable
 fun HomeScreen(
     navController: NavController,
-    map: @Composable (Modifier) -> Unit = { HomeMapView(modifier = it) }
+    map: @Composable (AppLocation?, Int) -> Unit = { loc, trigger -> HomeMapView(currentLocation = loc, recenterTrigger = trigger) }
 ) {
     val context = LocalContext.current
+
     var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+
+    val locationProvider: LocationProvider = remember {
+        FusedLocationProvider(context.applicationContext)
+    }
+
+    val currentLocation by locationProvider.locationUpdates
+        .collectAsState(initial = null)
+
+    var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
+
+    LaunchedEffect(hasPermission) {
+        if (hasPermission && isLocationEnabled(context)) {
+            locationProvider.startUpdates()
+        } else {
+            locationProvider.stopUpdates()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { locationProvider.stopUpdates() }
+    }
 
     fun openLocationSettings() {
         val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
@@ -59,11 +90,16 @@ fun HomeScreen(
 
     LocationPermissionHandler(
         onPermissionGranted = {
+            hasPermission = true
             if (!isLocationEnabled(context)) {
                 overlayReason = LocationBlockReason.GpsDisabled
             }
         }
-    ) { hasPermission, permissionActions ->
+    ) { permGranted, permissionActions ->
+
+        // Keep hasPermission in sync
+        LaunchedEffect(permGranted) { hasPermission = permGranted }
+
         Scaffold { innerPadding ->
 
             Box(
@@ -72,7 +108,7 @@ fun HomeScreen(
                     .padding(innerPadding)
             ) {
 
-                map(Modifier.fillMaxSize())
+                map(currentLocation, recenterTrigger)
 
                 HomeTopBar(
                     modifier = Modifier
@@ -101,17 +137,13 @@ fun HomeScreen(
                         icon = Icons.Filled.MyLocation,
                         contentDescription = "Recenter on my location",
                         onClick = {
-                            // Two-step check: permission → GPS
-                            if (hasPermission) {
-                                // Step 1 passed — check GPS
+                            if (permGranted) {
                                 if (isLocationEnabled(context)) {
-                                    // Both checks passed — do nothing for now
-                                    // (Phase 2.2+ will center map on user location)
+                                    recenterTrigger++
                                 } else {
                                     overlayReason = LocationBlockReason.GpsDisabled
                                 }
                             } else {
-                                // Step 1 failed — request permission
                                 overlayReason = LocationBlockReason.PermissionDenied
                                 permissionActions.request()
                             }
@@ -224,4 +256,3 @@ private fun MapControlButton(
         )
     }
 }
-
