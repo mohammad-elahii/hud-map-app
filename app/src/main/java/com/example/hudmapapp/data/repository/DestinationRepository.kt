@@ -4,7 +4,9 @@ import android.content.Context
 import com.example.hudmapapp.data.model.Destination
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.AutocompleteSessionToken
+import com.google.android.libraries.places.api.model.Place
 import com.google.android.libraries.places.api.model.RectangularBounds
+import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
 import kotlinx.coroutines.tasks.await
@@ -75,6 +77,38 @@ class DestinationRepository(
 
             sessionToken = AutocompleteSessionToken.newInstance()
             Result.success(destinations)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchPlaceDetails(placeId: String): Result<Destination> {
+        return try {
+            val placeFields = listOf(
+                Place.Field.ID,
+                Place.Field.DISPLAY_NAME,
+                Place.Field.FORMATTED_ADDRESS,
+                Place.Field.LOCATION
+            )
+
+            val request = FetchPlaceRequest.builder(placeId, placeFields).build()
+            val response = placesClient.fetchPlace(request).await()
+            val place = response.place
+
+            val location = place.location
+            if (location == null) {
+                return Result.failure(IllegalStateException("No coordinates available"))
+            }
+
+            Result.success(
+                Destination(
+                    placeId = place.id ?: placeId,
+                    name = place.displayName ?: "",
+                    address = place.formattedAddress ?: "",
+                    latitude = location.latitude,
+                    longitude = location.longitude
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

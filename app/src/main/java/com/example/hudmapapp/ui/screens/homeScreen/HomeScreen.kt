@@ -43,11 +43,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.location.AppLocation
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.DestinationSearchState
+import com.example.hudmapapp.data.model.SelectedDestinationState
+import com.example.hudmapapp.data.repository.DestinationRepository
 import com.example.hudmapapp.location.FusedLocationProvider
 import com.example.hudmapapp.location.LocationBlockReason
 import com.example.hudmapapp.location.LocationPermissionHandler
@@ -60,6 +63,8 @@ import com.example.hudmapapp.location.isLocationEnabled
 import com.example.hudmapapp.location.isNetworkAvailable
 import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.DeepPurple30
+import com.example.hudmapapp.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -67,12 +72,15 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     navController: NavController,
-    map: @Composable (AppLocation?, Int) -> Unit = { loc, trigger ->
-        HomeMapView(currentLocation = loc, recenterTrigger = trigger)
+    viewModel: HomeViewModel = viewModel(),
+    map: @Composable (AppLocation?, Int, SelectedDestinationState) -> Unit = { loc, trigger, selected ->
+        HomeMapView(currentLocation = loc, recenterTrigger = trigger, selectedDestination = selected)
     }
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val selectedDestination by viewModel.selectedDestination.collectAsState()
 
     var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
@@ -87,6 +95,10 @@ fun HomeScreen(
 
     val locationProvider: LocationProvider = remember {
         FusedLocationProvider(context.applicationContext)
+    }
+
+    val destinationRepository: DestinationRepository = remember {
+        DestinationRepository.create(context.applicationContext, BuildConfig.MAPS_API_KEY)
     }
 
     val currentLocation by locationProvider.locationUpdates
@@ -154,15 +166,45 @@ fun HomeScreen(
         searchState = DestinationSearchState.Searching
         searchJob = coroutineScope.launch {
             delay(300) // Debounce
-            // Placeholder: Show empty results until Places SDK is fully integrated
-            // In production, use destinationRepository.searchDestinations(query)
-            searchState = DestinationSearchState.Empty
+
+            val biasLat = currentLocation?.latitude
+            val biasLng = currentLocation?.longitude
+
+            val result = destinationRepository.searchDestinations(
+                query = query,
+                biasLatitude = biasLat,
+                biasLongitude = biasLng
+            )
+
+            result.fold(
+                onSuccess = { destinations ->
+                    searchState = if (destinations.isEmpty()) {
+                        DestinationSearchState.Empty
+                    } else {
+                        DestinationSearchState.Results(destinations)
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    searchState = DestinationSearchState.Error(
+                        e.message ?: "Search failed"
+                    )
+                }
+            )
         }
     }
 
     fun onDestinationSelected(destination: Destination) {
-        searchState = DestinationSearchState.Selected(destination)
-        // TODO: Pan camera to selected destination
+        viewModel.selectDestination(destination)
+        searchQuery = destination.name
+        searchState = DestinationSearchState.Idle
+
+        coroutineScope.launch {
+            val result = destinationRepository.fetchPlaceDetails(destination.placeId)
+            result.onSuccess { detailed ->
+                viewModel.changeDestination(detailed)
+            }
+        }
     }
 
     LocationPermissionHandler(
@@ -186,7 +228,7 @@ fun HomeScreen(
                     .padding(innerPadding)
             ) {
 
-                map(currentLocation, recenterTrigger)
+                map(currentLocation, recenterTrigger, selectedDestination)
 
                 HomeTopBar(
                     modifier = Modifier
@@ -305,6 +347,19 @@ fun HomeScreen(
                         }
                     )
                 }
+            }
+
+            if (selectedDestination is SelectedDestinationState.Selected) {
+                val dest = (selectedDestination as SelectedDestinationState.Selected).destination
+                DestinationBottomSheet(
+                    destination = dest,
+                    onConfirm = { viewModel.confirmDestination() },
+                    onClear = {
+                        viewModel.clearDestination()
+                        searchQuery = ""
+                    },
+                    onDismiss = { viewModel.clearDestination() }
+                )
             }
         }
     }
