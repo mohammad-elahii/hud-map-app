@@ -29,12 +29,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.data.model.SelectedDestinationState
 import com.example.hudmapapp.ui.theme.components.HudButton
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.rememberCameraPositionState
@@ -42,6 +45,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 private val DefaultMapCenter = LatLng(36.2949894, 59.5928662)
 private const val DefaultMapZoom = 14f
 private const val UserLocationZoom = 17f
+private const val DestinationZoom = 16f
 
 /**
  * Possible map failure modes.
@@ -56,6 +60,7 @@ sealed class MapError {
 internal fun HomeMapView(
     currentLocation: AppLocation?,
     recenterTrigger: Int,
+    selectedDestination: SelectedDestinationState = SelectedDestinationState.None,
     modifier: Modifier = Modifier
 ) {
     val cameraPositionState = rememberCameraPositionState {
@@ -71,6 +76,31 @@ internal fun HomeMapView(
             val userLatLng = LatLng(currentLocation!!.latitude, currentLocation.longitude)
             cameraPositionState.animate(
                 CameraUpdateFactory.newLatLngZoom(userLatLng, UserLocationZoom),
+                durationMs = 600
+            )
+        }
+    }
+
+    val destinationLatLng = when (selectedDestination) {
+        is SelectedDestinationState.Selected -> {
+            val d = selectedDestination.destination
+            if (d.latitude != 0.0 || d.longitude != 0.0) {
+                LatLng(d.latitude, d.longitude)
+            } else null
+        }
+        is SelectedDestinationState.Confirmed -> {
+            val d = selectedDestination.destination
+            if (d.latitude != 0.0 || d.longitude != 0.0) {
+                LatLng(d.latitude, d.longitude)
+            } else null
+        }
+        SelectedDestinationState.None -> null
+    }
+
+    LaunchedEffect(destinationLatLng) {
+        if (destinationLatLng != null) {
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLngZoom(destinationLatLng, DestinationZoom),
                 durationMs = 600
             )
         }
@@ -99,7 +129,26 @@ internal fun HomeMapView(
             onMapLoaded = {
                 mapError = MapError.None
             }
-        )
+        ) {
+            if (destinationLatLng != null) {
+                val markerState = remember(destinationLatLng) {
+                    MarkerState(position = destinationLatLng)
+                }
+                Marker(
+                    state = markerState,
+                    title = when (selectedDestination) {
+                        is SelectedDestinationState.Selected -> selectedDestination.destination.name
+                        is SelectedDestinationState.Confirmed -> selectedDestination.destination.name
+                        SelectedDestinationState.None -> ""
+                    },
+                    snippet = when (selectedDestination) {
+                        is SelectedDestinationState.Selected -> selectedDestination.destination.address
+                        is SelectedDestinationState.Confirmed -> selectedDestination.destination.address
+                        SelectedDestinationState.None -> ""
+                    }
+                )
+            }
+        }
 
         // Show error overlay if map failed to load
         if (mapError is MapError.InitializationFailed) {

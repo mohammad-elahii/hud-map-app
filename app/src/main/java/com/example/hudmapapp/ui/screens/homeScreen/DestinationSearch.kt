@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
@@ -30,9 +34,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.data.model.Destination
@@ -44,9 +55,18 @@ fun DestinationSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    autoFocus: Boolean = true
 ) {
     val colors = MaterialTheme.colorScheme
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(autoFocus) {
+        if (autoFocus) {
+            focusRequester.requestFocus()
+        }
+    }
 
     Row(
         modifier = modifier
@@ -66,15 +86,33 @@ fun DestinationSearchBar(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        Text(
-            text = query.ifBlank { "Search destination..." },
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (query.isBlank()) colors.onSurfaceVariant else colors.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
             modifier = Modifier
                 .weight(1f)
-                .clickable { onQueryChange(query) }
+                .focusRequester(focusRequester),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                color = colors.onSurface
+            ),
+            cursorBrush = SolidColor(colors.primary),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                keyboardController?.hide()
+            }),
+            decorationBox = { innerTextField ->
+                Box {
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "Search destination...",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                    innerTextField()
+                }
+            }
         )
 
         if (query.isNotBlank()) {
@@ -231,10 +269,4 @@ private fun DestinationSearchItem(
             )
         }
     }
-}
-
-private fun Modifier.heightIn(max: androidx.compose.ui.unit.Dp): Modifier {
-    return this.then(
-        Modifier.height(max)
-    )
 }
