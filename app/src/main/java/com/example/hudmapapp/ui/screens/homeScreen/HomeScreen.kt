@@ -37,8 +37,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.location.AppLocation
@@ -63,6 +66,7 @@ fun HomeScreen(
     }
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
@@ -80,16 +84,39 @@ fun HomeScreen(
 
     var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
 
-    LaunchedEffect(hasPermission) {
-        if (hasPermission && isLocationEnabled(context)) {
-            locationProvider.startUpdates()
-        } else {
+    // ---------------------------------------------------------------
+    // Lifecycle-aware start/stop
+    //
+    // START  → check permission + GPS → start updates
+    // STOP   → stop updates
+    // ---------------------------------------------------------------
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    hasPermission = hasLocationPermission(context)
+                    if (hasPermission && isLocationEnabled(context)) {
+                        locationProvider.startUpdates()
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    locationProvider.stopUpdates()
+                }
+                else -> { /* no-op */ }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             locationProvider.stopUpdates()
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { locationProvider.stopUpdates() }
+    // Also re-check on permission change (e.g. user grants in-dialog)
+    LaunchedEffect(hasPermission) {
+        if (hasPermission && isLocationEnabled(context)) {
+            locationProvider.startUpdates()
+        }
     }
 
     fun openLocationSettings() {
@@ -174,9 +201,7 @@ fun HomeScreen(
                     )
                 }
 
-                // Location status banner (non-blocking, shown at bottom)
                 if (!dismissBanner && permGranted && isLocationEnabled(context)) {
-                    // Determine the effective state to show
                     val bannerState = if (!networkAvailable) {
                         LocationState.NetworkUnavailable
                     } else {
@@ -190,13 +215,7 @@ fun HomeScreen(
                         is LocationState.NetworkUnavailable -> {
                             LocationStatusBanner(
                                 state = bannerState,
-                                onRetry = {
-                                    dismissBanner = false
-                                    networkAvailable = isNetworkAvailable(context)
-                                    if (hasPermission && isLocationEnabled(context) && networkAvailable) {
-                                        locationProvider.startUpdates()
-                                    }
-                                },
+                                onRetry = { retryLocation() },
                                 onOpenSettings = { openLocationSettings() },
                                 onDismiss = { dismissBanner = true },
                                 modifier = Modifier
@@ -208,7 +227,6 @@ fun HomeScreen(
                     }
                 }
 
-                // Blocking overlay for permission / GPS disabled
                 if (overlayReason != null) {
                     LocationBlockOverlay(
                         reason = overlayReason!!,
