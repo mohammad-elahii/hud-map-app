@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.data.model.Destination
+import com.example.hudmapapp.data.model.DestinationSearchState
 import com.example.hudmapapp.location.FusedLocationProvider
 import com.example.hudmapapp.location.LocationBlockReason
 import com.example.hudmapapp.location.LocationPermissionHandler
@@ -57,6 +60,9 @@ import com.example.hudmapapp.location.isLocationEnabled
 import com.example.hudmapapp.location.isNetworkAvailable
 import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.DeepPurple30
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
@@ -72,6 +78,12 @@ fun HomeScreen(
     var recenterTrigger by remember { mutableIntStateOf(0) }
     var dismissBanner by remember { mutableStateOf(false) }
     var networkAvailable by remember { mutableStateOf(isNetworkAvailable(context)) }
+
+    // Search state
+    var searchQuery by remember { mutableStateOf("") }
+    var searchState by remember { mutableStateOf<DestinationSearchState>(DestinationSearchState.Idle) }
+    val coroutineScope = rememberCoroutineScope()
+    var searchJob by remember { mutableStateOf<Job?>(null) }
 
     val locationProvider: LocationProvider = remember {
         FusedLocationProvider(context.applicationContext)
@@ -132,6 +144,27 @@ fun HomeScreen(
         }
     }
 
+    fun searchDestinations(query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            searchState = DestinationSearchState.Idle
+            return
+        }
+
+        searchState = DestinationSearchState.Searching
+        searchJob = coroutineScope.launch {
+            delay(300) // Debounce
+            // Placeholder: Show empty results until Places SDK is fully integrated
+            // In production, use destinationRepository.searchDestinations(query)
+            searchState = DestinationSearchState.Empty
+        }
+    }
+
+    fun onDestinationSelected(destination: Destination) {
+        searchState = DestinationSearchState.Selected(destination)
+        // TODO: Pan camera to selected destination
+    }
+
     LocationPermissionHandler(
         onPermissionGranted = {
             hasPermission = true
@@ -162,6 +195,31 @@ fun HomeScreen(
                     onSettingsClick = {
                         navController.navigate(AppRoute.HUD)
                     }
+                )
+
+                DestinationSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { query ->
+                        searchQuery = query
+                        searchDestinations(query)
+                    },
+                    onClear = {
+                        searchQuery = ""
+                        searchState = DestinationSearchState.Idle
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 100.dp)
+                )
+
+                DestinationSearchResults(
+                    searchState = searchState,
+                    onDestinationClick = { destination ->
+                        onDestinationSelected(destination)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 160.dp)
                 )
 
                 Column(
