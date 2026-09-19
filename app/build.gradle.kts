@@ -6,7 +6,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// Google Maps API key is stored locally in local.properties (never committed to Git).
 val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
@@ -15,6 +14,10 @@ val localProperties = Properties().apply {
 }
 
 val mapsApiKey: String = localProperties.getProperty("MAPS_API_KEY") ?: ""
+
+configurations.configureEach {
+    exclude(group = "com.google.android.gms", module = "play-services-maps")
+}
 
 android {
     namespace = "com.example.hudmapapp"
@@ -33,15 +36,12 @@ android {
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
     }
 
-    buildTypes {
-        release {
-            optimization {
-                enable = false
-            }
-        }
+    androidResources {
+        localeFilters += "en"
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -70,10 +70,12 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.play.services)
 
-    implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
     implementation(libs.places)
     implementation(libs.maps.compose)
+    implementation(libs.navigation)
+
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     testImplementation(libs.junit)
 
