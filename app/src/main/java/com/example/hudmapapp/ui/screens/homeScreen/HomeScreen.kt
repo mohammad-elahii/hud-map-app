@@ -49,6 +49,9 @@ import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.location.AppLocation
 import com.example.hudmapapp.HudMapApplication
 import com.example.hudmapapp.navigation.NavigationInitState
+import com.example.hudmapapp.navigation.NavigationSessionCoordinator
+import com.example.hudmapapp.navigation.NavigationSessionState
+import com.example.hudmapapp.navigation.SdkNavigatorAdapter
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.DestinationSearchState
 import com.example.hudmapapp.data.model.RoutePreview
@@ -133,12 +136,27 @@ fun HomeScreen(
 
     val navigationInitState by navigationManager.initState.collectAsState()
 
+    val sessionCoordinator = remember {
+        NavigationSessionCoordinator(
+            adapterProvider = {
+                val state = navigationManager.initState.value
+                if (state is NavigationInitState.Ready) {
+                    SdkNavigatorAdapter(state.navigator)
+                } else {
+                    null
+                }
+            }
+        )
+    }
+    val sessionState by sessionCoordinator.sessionState.collectAsState()
+
     LaunchedEffect(Unit) {
         navigationManager.initialize(context.applicationContext as HudMapApplication)
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            sessionCoordinator.stopNavigation()
             navigationManager.shutdown()
         }
     }
@@ -424,19 +442,47 @@ fun HomeScreen(
                 )
             }
 
-            if (selectedDestination is SelectedDestinationState.Confirmed) {
+            if (selectedDestination is SelectedDestinationState.Confirmed &&
+                sessionState !is NavigationSessionState.Active &&
+                sessionState !is NavigationSessionState.Starting
+            ) {
                 val dest = (selectedDestination as SelectedDestinationState.Confirmed).destination
                 RoutePreviewSheet(
                     destination = dest,
                     routePreviewState = routePreviewState,
                     selectedRoute = selectedRoute,
                     onRouteSelected = { routeId -> viewModel.selectRoute(routeId) },
-                    onStartNavigation = { route -> onStartNavigation(route) },
+                    onStartNavigation = { route ->
+                        sessionCoordinator.startNavigation(dest, route)
+                        onStartNavigation(route)
+                    },
                     onDismiss = {
                         viewModel.clearDestination()
                         searchQuery = ""
                     }
                 )
+            }
+
+            val activeSession = when (val session = sessionState) {
+                is NavigationSessionState.Active -> session
+                is NavigationSessionState.Starting -> session
+                else -> null
+            }
+            if (activeSession != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    NavigationSessionBanner(
+                        sessionState = activeSession,
+                        onStop = {
+                            sessionCoordinator.stopNavigation()
+                            viewModel.clearDestination()
+                            searchQuery = ""
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
