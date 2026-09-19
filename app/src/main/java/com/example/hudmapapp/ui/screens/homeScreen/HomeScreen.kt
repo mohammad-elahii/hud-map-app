@@ -47,6 +47,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.HudMapApplication
+import com.example.hudmapapp.navigation.NavigationInitState
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.DestinationSearchState
 import com.example.hudmapapp.data.model.SelectedDestinationState
@@ -99,6 +101,22 @@ fun HomeScreen(
 
     val destinationRepository: DestinationRepository = remember {
         DestinationRepository.create(context.applicationContext, BuildConfig.MAPS_API_KEY)
+    }
+
+    val navigationManager = remember {
+        (context.applicationContext as HudMapApplication).navigationManager
+    }
+
+    val navigationInitState by navigationManager.initState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        navigationManager.initialize(context.applicationContext as HudMapApplication)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            navigationManager.shutdown()
+        }
     }
 
     val currentLocation by locationProvider.locationUpdates
