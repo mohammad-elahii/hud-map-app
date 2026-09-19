@@ -29,6 +29,16 @@ interface NavigatorAdapter {
 
     fun removeRouteChangedListener(listener: Navigator.RouteChangedListener)
 
+    fun addRemainingTimeOrDistanceChangedListener(listener: Navigator.RemainingTimeOrDistanceChangedListener)
+
+    fun removeRemainingTimeOrDistanceChangedListener(listener: Navigator.RemainingTimeOrDistanceChangedListener)
+
+    fun addReroutingListener(listener: Navigator.ReroutingListener)
+
+    fun removeReroutingListener(listener: Navigator.ReroutingListener)
+
+    fun readGuidance(): GuidanceSnapshot?
+
     fun isGuidanceRunning(): Boolean
 }
 
@@ -87,6 +97,46 @@ class SdkNavigatorAdapter(
 
     override fun removeRouteChangedListener(listener: Navigator.RouteChangedListener) {
         navigator.removeRouteChangedListener(listener)
+    }
+
+    override fun addRemainingTimeOrDistanceChangedListener(
+        listener: Navigator.RemainingTimeOrDistanceChangedListener
+    ) {
+        navigator.addRemainingTimeOrDistanceChangedListener(60, 100, listener)
+    }
+
+    override fun removeRemainingTimeOrDistanceChangedListener(
+        listener: Navigator.RemainingTimeOrDistanceChangedListener
+    ) {
+        navigator.removeRemainingTimeOrDistanceChangedListener(listener)
+    }
+
+    override fun addReroutingListener(listener: Navigator.ReroutingListener) {
+        navigator.addReroutingListener(listener)
+    }
+
+    override fun removeReroutingListener(listener: Navigator.ReroutingListener) {
+        navigator.removeReroutingListener(listener)
+    }
+
+    override fun readGuidance(): GuidanceSnapshot? {
+        return try {
+            val segments = navigator.getRouteSegments()
+            val current = segments.firstOrNull() ?: return null
+            val times = navigator.getTimeAndDistanceList()
+            val currentTime = times.firstOrNull()
+            GuidanceSnapshot(
+                currentStep = null,
+                nextStep = null,
+                distanceToManeuverMeters = null,
+                timeToManeuverSeconds = null,
+                remainingDistanceMeters = currentTime?.meters,
+                remainingDurationSeconds = currentTime?.seconds?.toLong(),
+                routeChanged = false
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     override fun isGuidanceRunning(): Boolean = navigator.isGuidanceRunning()

@@ -24,11 +24,21 @@ class NavigationSessionCoordinator(
     private var adapter: NavigatorAdapter? = null
     private var sessionSequence = 0L
 
+    private val _navigationState =
+        MutableStateFlow(NavigationState())
+    val navigationState: StateFlow<NavigationState> = _navigationState.asStateFlow()
+
     private val arrivalListener = Navigator.ArrivalListener { event ->
         onArrival(event)
     }
     private val routeChangedListener = Navigator.RouteChangedListener {
         onRouteChanged()
+    }
+    private val progressListener = Navigator.RemainingTimeOrDistanceChangedListener {
+        onProgressChanged()
+    }
+    private val reroutingListener = Navigator.ReroutingListener {
+        onRerouting()
     }
     private var listenersRegistered = false
 
@@ -89,6 +99,10 @@ class NavigationSessionCoordinator(
             }
             logger.debug("navigation session #$sequence active")
             _sessionState.value = NavigationSessionState.Active(destination, route)
+            _navigationState.value = applyGuidance(
+                NavigationState(status = GuidanceStatus.ACTIVE),
+                provided.readGuidance()
+            )
         }
     }
 
@@ -109,6 +123,7 @@ class NavigationSessionCoordinator(
         unregisterListeners()
         adapter = null
         _sessionState.value = NavigationSessionState.Stopped
+        _navigationState.value = NavigationState(status = GuidanceStatus.STOPPED)
         logger.debug("navigation session stopped")
     }
 
@@ -127,6 +142,8 @@ class NavigationSessionCoordinator(
         if (listenersRegistered) return
         target.addArrivalListener(arrivalListener)
         target.addRouteChangedListener(routeChangedListener)
+        target.addRemainingTimeOrDistanceChangedListener(progressListener)
+        target.addReroutingListener(reroutingListener)
         listenersRegistered = true
     }
 
@@ -140,6 +157,14 @@ class NavigationSessionCoordinator(
             adapter?.removeRouteChangedListener(routeChangedListener)
         } catch (_: Exception) {
         }
+        try {
+            adapter?.removeRemainingTimeOrDistanceChangedListener(progressListener)
+        } catch (_: Exception) {
+        }
+        try {
+            adapter?.removeReroutingListener(reroutingListener)
+        } catch (_: Exception) {
+        }
         listenersRegistered = false
     }
 
@@ -150,10 +175,32 @@ class NavigationSessionCoordinator(
         logger.debug("navigation session arrived")
         unregisterListeners()
         _sessionState.value = NavigationSessionState.Arrived
+        _navigationState.value = _navigationState.value.copy(status = GuidanceStatus.ARRIVED)
     }
 
     private fun onRouteChanged() {
         if (_sessionState.value !is NavigationSessionState.Active) return
-        logger.debug("navigation route changed (first guidance event received)")
+        logger.debug("navigation route changed")
+        _navigationState.value = applyGuidance(
+            _navigationState.value.copy(isRerouting = false),
+            adapter?.readGuidance()
+        )
+    }
+
+    private fun onProgressChanged() {
+        if (_sessionState.value !is NavigationSessionState.Active) return
+        _navigationState.value = applyGuidance(
+            _navigationState.value,
+            adapter?.readGuidance()
+        )
+    }
+
+    private fun onRerouting() {
+        if (_sessionState.value !is NavigationSessionState.Active) return
+        logger.debug("navigation rerouting requested")
+        _navigationState.value = _navigationState.value.copy(
+            status = GuidanceStatus.REROUTING,
+            isRerouting = true
+        )
     }
 }
