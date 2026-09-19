@@ -94,6 +94,24 @@ private class FakeNavigatorAdapter(
         routeChangedListeners.remove(listener)
     }
 
+    override fun addRemainingTimeOrDistanceChangedListener(
+        listener: Navigator.RemainingTimeOrDistanceChangedListener
+    ) {
+    }
+
+    override fun removeRemainingTimeOrDistanceChangedListener(
+        listener: Navigator.RemainingTimeOrDistanceChangedListener
+    ) {
+    }
+
+    override fun addReroutingListener(listener: Navigator.ReroutingListener) {
+    }
+
+    override fun removeReroutingListener(listener: Navigator.ReroutingListener) {
+    }
+
+    override fun readGuidance(): com.example.hudmapapp.navigation.GuidanceSnapshot? = null
+
     override fun isGuidanceRunning(): Boolean = guidanceRunning
 
     fun arrivalListenerCount() = arrivalListeners.size
