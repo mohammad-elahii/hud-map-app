@@ -22,11 +22,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.navigation.NavigationSessionState
+import com.example.hudmapapp.navigation.recoveryActionFor
+import com.example.hudmapapp.navigation.userMessageFor
+import com.example.hudmapapp.ui.theme.components.HudButton
+import com.example.hudmapapp.navigation.SessionRecoveryAction
 
 @Composable
 fun NavigationSessionBanner(
     sessionState: NavigationSessionState,
     onStop: () -> Unit,
+    onRetry: () -> Unit = {},
+    onResume: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
@@ -51,7 +57,28 @@ fun NavigationSessionBanner(
                     modifier = Modifier.weight(1f)
                 )
             }
-            is NavigationSessionState.Active -> {
+            is NavigationSessionState.Active,
+            is NavigationSessionState.Rerouting,
+            is NavigationSessionState.OffRoute,
+            is NavigationSessionState.Interrupted -> {
+                val title = when (sessionState) {
+                    is NavigationSessionState.Active ->
+                        "Navigating to ${sessionState.destination.name}"
+                    is NavigationSessionState.Rerouting ->
+                        "Finding a better route"
+                    is NavigationSessionState.OffRoute ->
+                        "Off route — recalculating"
+                    is NavigationSessionState.Interrupted ->
+                        userMessageFor(sessionState) ?: "Navigation paused"
+                    else -> "Navigation"
+                }
+                val subtitle = when (sessionState) {
+                    is NavigationSessionState.Active -> routeSummary(sessionState.route)
+                    is NavigationSessionState.Rerouting -> routeSummary(sessionState.route)
+                    is NavigationSessionState.OffRoute -> routeSummary(sessionState.route)
+                    is NavigationSessionState.Interrupted -> routeSummary(sessionState.route)
+                    else -> ""
+                }
                 Icon(
                     imageVector = Icons.Filled.Navigation,
                     contentDescription = null,
@@ -60,16 +87,42 @@ fun NavigationSessionBanner(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Navigating to ${sessionState.destination.name}",
+                        text = title,
                         style = MaterialTheme.typography.titleSmall,
                         color = colors.onPrimaryContainer,
                         maxLines = 1
                     )
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onPrimaryContainer
+                        )
+                    }
+                    if (sessionState is NavigationSessionState.Interrupted) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        HudButton(
+                            text = "Resume",
+                            onClick = onResume,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+            is NavigationSessionState.Error -> {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = routeSummary(sessionState.route),
-                        style = MaterialTheme.typography.bodySmall,
+                        text = userMessageFor(sessionState) ?: "Navigation error",
+                        style = MaterialTheme.typography.titleSmall,
                         color = colors.onPrimaryContainer
                     )
+                    if (recoveryActionFor(sessionState) == SessionRecoveryAction.RETRY_START) {
+                        HudButton(
+                            text = "Retry",
+                            onClick = onRetry,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
             else -> {

@@ -47,11 +47,18 @@ class NavigationSessionCoordinator(
             logger.warn("startNavigation rejected: invalid destination coordinates")
             _sessionState.value =
                 NavigationSessionState.Error(NavigationSessionError.InvalidRoute)
+            _navigationState.value = NavigationState(
+                status = GuidanceStatus.ERROR,
+                error = NavigationDataError.GuidanceUnavailable
+            )
             return
         }
         val current = _sessionState.value
         if (current is NavigationSessionState.Starting ||
-            current is NavigationSessionState.Active
+            current is NavigationSessionState.Active ||
+            current is NavigationSessionState.Rerouting ||
+            current is NavigationSessionState.OffRoute ||
+            current is NavigationSessionState.Interrupted
         ) {
             logger.debug("startNavigation ignored: session already in progress")
             return
@@ -62,10 +69,16 @@ class NavigationSessionCoordinator(
             logger.warn("startNavigation failed: navigator not ready")
             _sessionState.value =
                 NavigationSessionState.Error(NavigationSessionError.NavigatorNotReady)
+            _navigationState.value = NavigationState(
+                status = GuidanceStatus.ERROR,
+                error = NavigationDataError.GuidanceUnavailable
+            )
             return
         }
 
         adapter = provided
+        lastDestination = destination
+        lastRoute = route
         val sequence = ++sessionSequence
         _sessionState.value = NavigationSessionState.Starting
         logger.debug("navigation session #$sequence starting route=${route.id}")
@@ -79,8 +92,15 @@ class NavigationSessionCoordinator(
             if (status != Navigator.RouteStatus.OK) {
                 logger.warn("setDestinations failed status=$status")
                 unregisterListeners()
-                _sessionState.value = NavigationSessionState.Error(
-                    NavigationSessionError.RouteFailed(status.name)
+                val error = when (status) {
+                    Navigator.RouteStatus.NETWORK_ERROR -> NavigationSessionError.NetworkError
+                    Navigator.RouteStatus.ROUTE_CANCELED -> NavigationSessionError.GuidanceFailed
+                    else -> NavigationSessionError.RouteFailed(status.name)
+                }
+                _sessionState.value = NavigationSessionState.Error(error)
+                _navigationState.value = NavigationState(
+                    status = GuidanceStatus.ERROR,
+                    error = NavigationDataError.GuidanceUnavailable
                 )
                 return@setDestinations
             }
@@ -94,6 +114,10 @@ class NavigationSessionCoordinator(
                 unregisterListeners()
                 _sessionState.value = NavigationSessionState.Error(
                     NavigationSessionError.GuidanceFailed
+                )
+                _navigationState.value = NavigationState(
+                    status = GuidanceStatus.ERROR,
+                    error = NavigationDataError.GuidanceUnavailable
                 )
                 return@setDestinations
             }
@@ -109,7 +133,8 @@ class NavigationSessionCoordinator(
     fun stopNavigation() {
         val current = _sessionState.value
         if (current is NavigationSessionState.Idle ||
-            current is NavigationSessionState.Stopped
+            current is NavigationSessionState.Stopped ||
+            current is NavigationSessionState.Arrived
         ) {
             return
         }
@@ -122,6 +147,8 @@ class NavigationSessionCoordinator(
         }
         unregisterListeners()
         adapter = null
+        lastDestination = null
+        lastRoute = null
         _sessionState.value = NavigationSessionState.Stopped
         _navigationState.value = NavigationState(status = GuidanceStatus.STOPPED)
         logger.debug("navigation session stopped")
@@ -168,39 +195,119 @@ class NavigationSessionCoordinator(
         listenersRegistered = false
     }
 
-    private fun onArrival(event: ArrivalEvent) {
+    fun retryStart() {
         val current = _sessionState.value
-        if (current !is NavigationSessionState.Active) return
+        if (current !is NavigationSessionState.Error &&
+            current !is NavigationSessionState.Interrupted
+        ) {
+            return
+        }
+        val destination = lastDestination ?: return
+        val route = lastRoute ?: return
+        _sessionState.value = NavigationSessionState.Idle
+        startNavigation(destination, route)
+    }
+
+    fun resume() {
+        val current = _sessionState.value
+        if (current !is NavigationSessionState.Interrupted) return
+        _sessionState.value = NavigationSessionState.Active(current.destination, current.route)
+        _navigationState.value = applyGuidance(
+            _navigationState.value.copy(status = GuidanceStatus.ACTIVE),
+            adapter?.readGuidance(),
+            status = GuidanceStatus.ACTIVE
+        )
+        logger.debug("navigation session resumed")
+    }
+
+    fun notifyLocationUnavailable() {
+        val current = activeDestination() ?: return
+        _sessionState.value = NavigationSessionState.Interrupted(
+            destination = current.first,
+            route = current.second,
+            reason = InterruptionReason.LOCATION_UNAVAILABLE
+        )
+        _navigationState.value = _navigationState.value.copy(status = GuidanceStatus.INTERRUPTED)
+        logger.debug("navigation interrupted: location unavailable")
+    }
+
+    fun notifyNetworkLost() {
+        val current = activeDestination() ?: return
+        _sessionState.value = NavigationSessionState.Interrupted(
+            destination = current.first,
+            route = current.second,
+            reason = InterruptionReason.NETWORK_ERROR
+        )
+        _navigationState.value = _navigationState.value.copy(status = GuidanceStatus.INTERRUPTED)
+        logger.debug("navigation interrupted: network lost")
+    }
+
+    private var lastDestination: Destination? = null
+    private var lastRoute: RoutePreview? = null
+
+    private fun activeDestination(): Pair<Destination, RoutePreview>? {
+        return when (val current = _sessionState.value) {
+            is NavigationSessionState.Active -> current.destination to current.route
+            is NavigationSessionState.Rerouting -> current.destination to current.route
+            is NavigationSessionState.OffRoute -> current.destination to current.route
+            is NavigationSessionState.Interrupted -> current.destination to current.route
+            else -> null
+        }
+    }
+
+    private fun onArrival(event: ArrivalEvent) {
+        val current = activeDestination() ?: return
         if (!event.isFinal()) return
         logger.debug("navigation session arrived")
         unregisterListeners()
+        adapter = null
         _sessionState.value = NavigationSessionState.Arrived
         _navigationState.value = _navigationState.value.copy(status = GuidanceStatus.ARRIVED)
     }
 
     private fun onRouteChanged() {
-        if (_sessionState.value !is NavigationSessionState.Active) return
+        val current = activeDestination() ?: return
         logger.debug("navigation route changed")
+        _sessionState.value = NavigationSessionState.Active(current.first, current.second)
         _navigationState.value = applyGuidance(
-            _navigationState.value.copy(isRerouting = false),
-            adapter?.readGuidance()
+            _navigationState.value.copy(status = GuidanceStatus.ACTIVE, isRerouting = false),
+            adapter?.readGuidance(),
+            status = GuidanceStatus.ACTIVE
         )
     }
 
     private fun onProgressChanged() {
-        if (_sessionState.value !is NavigationSessionState.Active) return
+        val current = _sessionState.value
+        if (current !is NavigationSessionState.Active &&
+            current !is NavigationSessionState.Rerouting &&
+            current !is NavigationSessionState.OffRoute
+        ) {
+            return
+        }
         _navigationState.value = applyGuidance(
             _navigationState.value,
-            adapter?.readGuidance()
+            adapter?.readGuidance(),
+            status = _navigationState.value.status
         )
     }
 
     private fun onRerouting() {
-        if (_sessionState.value !is NavigationSessionState.Active) return
+        val current = activeDestination() ?: return
         logger.debug("navigation rerouting requested")
+        _sessionState.value = NavigationSessionState.OffRoute(current.first, current.second)
+        _navigationState.value = _navigationState.value.copy(
+            status = GuidanceStatus.OFF_ROUTE,
+            isRerouting = true
+        )
+    }
+
+    internal fun onRerouteResolved() {
+        val current = activeDestination() ?: return
+        _sessionState.value = NavigationSessionState.Rerouting(current.first, current.second)
         _navigationState.value = _navigationState.value.copy(
             status = GuidanceStatus.REROUTING,
             isRerouting = true
         )
+        logger.debug("navigation rerouting in progress")
     }
 }
