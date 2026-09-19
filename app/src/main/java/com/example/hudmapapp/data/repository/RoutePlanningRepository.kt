@@ -73,15 +73,66 @@ class RoutePlanningRepository(
             return true
         }
 
-        fun create(apiKey: String): RoutePlanningRepository {
-            return RoutePlanningRepository(RoutesApiDataSource(apiKey))
+        fun create(
+            context: android.content.Context,
+            apiKey: String,
+            logger: RouteLogger = RouteLogger.android()
+        ): RoutePlanningRepository {
+            return RoutePlanningRepository(
+                RoutesApiDataSource(
+                    apiKey = apiKey,
+                    packageName = context.packageName,
+                    certificateSha1 = signingCertificateSha1(context, context.packageName),
+                    logger = logger
+                )
+            )
+        }
+
+        internal fun signingCertificateSha1(
+            context: android.content.Context,
+            packageName: String
+        ): String? {
+            return try {
+                val packageInfo = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    context.packageManager.getPackageInfo(
+                        packageName,
+                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(
+                        packageName,
+                        android.content.pm.PackageManager.GET_SIGNATURES
+                    )
+                }
+                val signatures = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    val signingInfo = packageInfo.signingInfo ?: return null
+                    if (signingInfo.hasMultipleSigners()) {
+                        signingInfo.apkContentsSigners
+                    } else {
+                        signingInfo.signingCertificateHistory
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageInfo.signatures
+                }
+                val signature = signatures?.firstOrNull() ?: return null
+                val digest = java.security.MessageDigest.getInstance("SHA-1")
+                val fingerprint = digest.digest(signature.toByteArray())
+                fingerprint.joinToString(":") { "%02X".format(it) }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }
 
 class RoutesApiDataSource(
     private val apiKey: String,
-    private val timeoutMillis: Int = 15_000
+    private val timeoutMillis: Int = 15_000,
+    private val packageName: String? = null,
+    private val certificateSha1: String? = null,
+    private val logger: RouteLogger = RouteLogger.android()
 ) : RoutePlanningDataSource {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -99,34 +150,71 @@ class RoutesApiDataSource(
                     setRequestProperty("Content-Type", "application/json")
                     setRequestProperty("X-Goog-Api-Key", apiKey)
                     setRequestProperty("X-Goog-FieldMask", FIELD_MASK)
+                    if (!packageName.isNullOrBlank()) {
+                        setRequestProperty("X-Android-Package", packageName)
+                    }
+                    if (!certificateSha1.isNullOrBlank()) {
+                        setRequestProperty("X-Android-Cert", certificateSha1)
+                    }
                 }
+                if (packageName.isNullOrBlank() || certificateSha1.isNullOrBlank()) {
+                    logger.warn(
+                        "Routes API identity headers incomplete " +
+                            "package=$packageName certPresent=${!certificateSha1.isNullOrBlank()}"
+                    )
+                } else {
+                    logger.debug(
+                        "Routes API identity package=$packageName certSha1=$certificateSha1"
+                    )
+                }
+                logger.debug(
+                    "Routes API key len=${apiKey.length} " +
+                        "prefix=${apiKey.take(6)} suffix=${apiKey.takeLast(4)}"
+                )
                 connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
 
                 val statusCode = connection.responseCode
+                logger.debug("Routes API HTTP $statusCode")
                 if (statusCode == 429) {
+                    logger.warn("Routes API quota exceeded (429)")
                     return@withContext RoutePlanningResult.Failure(RoutePreviewError.QuotaExceeded)
                 }
                 if (statusCode == 401 || statusCode == 403) {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    logger.warn("Routes API auth failure ($statusCode): $errorBody")
                     return@withContext RoutePlanningResult.Failure(RoutePreviewError.Authentication)
                 }
                 if (statusCode == 400) {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    logger.warn("Routes API invalid request (400): $errorBody")
                     return@withContext RoutePlanningResult.Failure(RoutePreviewError.InvalidRequest)
                 }
                 if (statusCode !in 200..299) {
+                    val errorBody = try {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    logger.warn("Routes API unexpected status $statusCode: $errorBody")
                     return@withContext RoutePlanningResult.Failure(RoutePreviewError.Unknown)
                 }
 
                 val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                logger.debug("Routes API response ${responseBody.length} chars")
                 parseRoutes(responseBody)
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: SocketTimeoutException) {
+            } catch (e: SocketTimeoutException) {
+                logger.warn("Routes API timeout", e)
                 RoutePlanningResult.Failure(RoutePreviewError.Timeout)
-            } catch (_: UnknownHostException) {
+            } catch (e: UnknownHostException) {
+                logger.warn("Routes API no network", e)
                 RoutePlanningResult.Failure(RoutePreviewError.Network)
-            } catch (_: IOException) {
+            } catch (e: IOException) {
+                logger.warn("Routes API IO error", e)
                 RoutePlanningResult.Failure(RoutePreviewError.Network)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                logger.warn("Routes API unexpected error", e)
                 RoutePlanningResult.Failure(RoutePreviewError.Unknown)
             } finally {
                 connection?.disconnect()

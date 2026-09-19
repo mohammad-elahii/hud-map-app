@@ -5,8 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.example.hudmapapp.data.model.RoutePreview
 import com.example.hudmapapp.data.model.RoutePreviewError
 import com.example.hudmapapp.data.model.RoutePreviewState
+import com.example.hudmapapp.data.repository.RouteLogger
 import com.example.hudmapapp.data.repository.RoutePlanningRepository
 import com.example.hudmapapp.data.repository.RoutePlanningResult
+import com.example.hudmapapp.data.repository.debug
+import com.example.hudmapapp.data.repository.warn
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -16,7 +19,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class RoutePreviewCoordinator(
-    private val routePlanningRepository: RoutePlanningRepository
+    private val routePlanningRepository: RoutePlanningRepository,
+    private val logger: RouteLogger = RouteLogger.android()
 ) : ViewModel() {
 
     private val _routePreviewState =
@@ -42,11 +46,19 @@ class RoutePreviewCoordinator(
         if (!RoutePlanningRepository.isValidCoordinate(originLatitude, originLongitude) ||
             !RoutePlanningRepository.isValidCoordinate(destinationLatitude, destinationLongitude)
         ) {
+            logger.warn(
+                "invalid coordinates origin=($originLatitude,$originLongitude) " +
+                    "destination=($destinationLatitude,$destinationLongitude)"
+            )
             _routePreviewState.value =
                 RoutePreviewState.Error(RoutePreviewError.InvalidRequest)
             return
         }
 
+        logger.debug(
+            "request #$sequence started origin=($originLatitude,$originLongitude) " +
+                "destination=($destinationLatitude,$destinationLongitude)"
+        )
         _routePreviewState.value = RoutePreviewState.Loading
         previewJob = viewModelScope.launch {
             try {
@@ -56,7 +68,11 @@ class RoutePreviewCoordinator(
                     destinationLatitude = destinationLatitude,
                     destinationLongitude = destinationLongitude
                 )
-                if (sequence != requestSequence.get()) return@launch
+                if (sequence != requestSequence.get()) {
+                    logger.debug("request #$sequence stale, ignoring result=$result")
+                    return@launch
+                }
+                logger.debug("request #$sequence finished result=$result")
                 when (result) {
                     is RoutePlanningResult.Success -> {
                         _routePreviewState.value =
@@ -69,6 +85,7 @@ class RoutePreviewCoordinator(
                         _routePreviewState.value = RoutePreviewState.Error(result.error)
                 }
             } catch (e: CancellationException) {
+                logger.debug("request #$sequence cancelled")
                 if (sequence == requestSequence.get()) {
                     _routePreviewState.value = RoutePreviewState.Cancelled
                 }

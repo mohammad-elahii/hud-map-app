@@ -29,23 +29,34 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.data.model.RoutePreview
 import com.example.hudmapapp.data.model.SelectedDestinationState
 import com.example.hudmapapp.ui.theme.components.HudButton
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.JointType
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 
 private val DefaultMapCenter = LatLng(36.2949894, 59.5928662)
 private const val DefaultMapZoom = 14f
 private const val UserLocationZoom = 17f
 private const val DestinationZoom = 16f
+private const val RouteBoundsPaddingPx = 120
+private const val SelectedRouteWidth = 14f
+private const val AlternativeRouteWidth = 9f
+private const val SelectedRouteZIndex = 2f
+private const val AlternativeRouteZIndex = 1f
+private val SelectedRouteColor = androidx.compose.ui.graphics.Color(0xFF7C4DFF)
+private val AlternativeRouteColor = androidx.compose.ui.graphics.Color(0xFF9E9E9E)
 
 /**
  * Possible map failure modes.
@@ -61,6 +72,9 @@ internal fun HomeMapView(
     currentLocation: AppLocation?,
     recenterTrigger: Int,
     selectedDestination: SelectedDestinationState = SelectedDestinationState.None,
+    routePreviews: List<RoutePreview> = emptyList(),
+    selectedRouteId: String? = null,
+    onRouteSelected: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val cameraPositionState = rememberCameraPositionState {
@@ -106,6 +120,13 @@ internal fun HomeMapView(
         }
     }
 
+    val selectedRoute = routePreviews.firstOrNull { it.id == selectedRouteId }
+        ?: routePreviews.firstOrNull()
+    val orderedRoutes = buildList {
+        routePreviews.filter { it.id != selectedRoute?.id }.forEach { add(it) }
+        selectedRoute?.let { add(it) }
+    }
+
     Box(modifier = modifier) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
@@ -130,6 +151,22 @@ internal fun HomeMapView(
                 mapError = MapError.None
             }
         ) {
+            orderedRoutes.forEach { route ->
+                val points = route.polylinePoints.map { LatLng(it.latitude, it.longitude) }
+                if (points.size >= 2) {
+                    val isSelected = route.id == selectedRoute?.id
+                    Polyline(
+                        points = points,
+                        clickable = true,
+                        color = if (isSelected) SelectedRouteColor else AlternativeRouteColor,
+                        jointType = JointType.ROUND,
+                        width = if (isSelected) SelectedRouteWidth else AlternativeRouteWidth,
+                        zIndex = if (isSelected) SelectedRouteZIndex else AlternativeRouteZIndex,
+                        onClick = { onRouteSelected(route.id) }
+                    )
+                }
+            }
+
             if (destinationLatLng != null) {
                 val markerState = remember(destinationLatLng) {
                     MarkerState(position = destinationLatLng)
@@ -147,6 +184,22 @@ internal fun HomeMapView(
                         SelectedDestinationState.None -> ""
                     }
                 )
+            }
+        }
+
+        LaunchedEffect(selectedRoute?.id) {
+            val route = selectedRoute ?: return@LaunchedEffect
+            val points = route.polylinePoints.map { LatLng(it.latitude, it.longitude) }
+            if (points.size < 2) return@LaunchedEffect
+            val bounds = LatLngBounds.builder().apply {
+                points.forEach { include(it) }
+            }.build()
+            try {
+                cameraPositionState.animate(
+                    CameraUpdateFactory.newLatLngBounds(bounds, RouteBoundsPaddingPx),
+                    durationMs = 600
+                )
+            } catch (_: IllegalStateException) {
             }
         }
 
