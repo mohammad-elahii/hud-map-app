@@ -30,6 +30,7 @@ import com.example.hudmapapp.navigation.SessionRecoveryAction
 @Composable
 fun NavigationSessionBanner(
     sessionState: NavigationSessionState,
+    navigationState: com.example.hudmapapp.navigation.NavigationState? = null,
     onStop: () -> Unit,
     onRetry: () -> Unit = {},
     onResume: () -> Unit = {},
@@ -72,8 +73,16 @@ fun NavigationSessionBanner(
                         userMessageFor(sessionState) ?: "Navigation paused"
                     else -> "Navigation"
                 }
+                val maneuver = navigationState?.currentManeuver
+                val progress = navigationState?.progress
+                val liveLines = listOfNotNull(
+                    maneuver?.instruction?.takeIf { it.isNotBlank() },
+                    progress?.distanceToManeuverMeters?.let { formatLiveDistance(it) },
+                    liveEtaLine(progress?.remainingDistanceMeters, progress?.remainingDurationSeconds)
+                )
                 val subtitle = when (sessionState) {
-                    is NavigationSessionState.Active -> routeSummary(sessionState.route)
+                    is NavigationSessionState.Active ->
+                        liveLines.joinToString(" · ").ifBlank { routeSummary(sessionState.route) }
                     is NavigationSessionState.Rerouting -> routeSummary(sessionState.route)
                     is NavigationSessionState.OffRoute -> routeSummary(sessionState.route)
                     is NavigationSessionState.Interrupted -> routeSummary(sessionState.route)
@@ -96,7 +105,8 @@ fun NavigationSessionBanner(
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
-                            color = colors.onPrimaryContainer
+                            color = colors.onPrimaryContainer,
+                            maxLines = 2
                         )
                     }
                     if (sessionState is NavigationSessionState.Interrupted) {
@@ -141,5 +151,31 @@ fun NavigationSessionBanner(
                 tint = colors.onPrimaryContainer
             )
         }
+    }
+}
+
+internal fun formatLiveDistance(meters: Int): String {
+    return if (meters >= 1000) {
+        String.format(java.util.Locale.US, "%.1f km", meters / 1000.0)
+    } else {
+        "$meters m"
+    }
+}
+
+internal fun liveEtaLine(remainingMeters: Int?, remainingSeconds: Long?): String? {
+    if (remainingMeters == null && remainingSeconds == null) return null
+    val distance = remainingMeters?.let { formatLiveDistance(it) }
+    val duration = remainingSeconds?.let { formatLiveDuration(it) }
+    return listOfNotNull(distance, duration).joinToString(" · ").ifBlank { null }
+}
+
+internal fun formatLiveDuration(totalSeconds: Long): String {
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    return when {
+        hours > 0 && minutes > 0 -> "${hours}h ${minutes}min left"
+        hours > 0 -> "${hours}h left"
+        minutes > 0 -> "${minutes} min left"
+        else -> "${totalSeconds}s left"
     }
 }

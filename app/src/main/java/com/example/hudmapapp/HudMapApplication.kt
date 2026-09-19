@@ -11,7 +11,9 @@ class HudMapApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        NavigationApi.setApiKey(BuildConfig.MAPS_API_KEY)
+        if (BuildConfig.MAPS_API_KEY.isNotBlank()) {
+            NavigationApi.setApiKey(BuildConfig.MAPS_API_KEY)
+        }
         navigationManager = NavigationManager()
     }
 }

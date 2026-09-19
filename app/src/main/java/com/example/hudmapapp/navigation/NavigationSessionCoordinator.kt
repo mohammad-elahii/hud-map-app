@@ -1,6 +1,8 @@
 package com.example.hudmapapp.navigation
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.RoutePreview
 import com.example.hudmapapp.data.repository.RouteLogger
@@ -8,14 +10,37 @@ import com.example.hudmapapp.data.repository.debug
 import com.example.hudmapapp.data.repository.warn
 import com.google.android.libraries.navigation.ArrivalEvent
 import com.google.android.libraries.navigation.Navigator
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 class NavigationSessionCoordinator(
     private val adapterProvider: () -> NavigatorAdapter?,
     private val logger: RouteLogger = RouteLogger.android()
 ) : ViewModel() {
+
+    class Factory(
+        private val navigationManager: NavigationManager,
+        private val logger: RouteLogger = RouteLogger.android()
+    ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return NavigationSessionCoordinator(
+                adapterProvider = {
+                    val state = navigationManager.initState.value
+                    if (state is NavigationInitState.Ready) {
+                        SdkNavigatorAdapter(state.navigator)
+                    } else {
+                        null
+                    }
+                },
+                logger = logger
+            ) as T
+        }
+    }
 
     private val _sessionState =
         MutableStateFlow<NavigationSessionState>(NavigationSessionState.Idle)
@@ -341,5 +366,43 @@ class NavigationSessionCoordinator(
             isRerouting = true
         )
         logger.debug("navigation rerouting in progress")
+    }
+
+    private var backgroundJob: Job? = null
+
+    fun onAppBackgrounded() {
+        val current = activeDestination() ?: return
+        if (backgroundJob != null) return
+        logger.debug("app backgrounded during active session")
+        backgroundJob = viewModelScope.launch {
+            delay(BACKGROUND_GRACE_MILLIS)
+            val stillActive = activeDestination()
+            if (stillActive != null) {
+                _sessionState.value = NavigationSessionState.Interrupted(
+                    destination = stillActive.first,
+                    route = stillActive.second,
+                    reason = InterruptionReason.GUIDANCE_PAUSED
+                )
+                _navigationState.value =
+                    _navigationState.value.copy(status = GuidanceStatus.INTERRUPTED)
+                logger.debug("navigation paused after background grace period")
+            }
+            backgroundJob = null
+        }
+    }
+
+    fun onAppForegrounded() {
+        backgroundJob?.cancel()
+        backgroundJob = null
+        val current = _sessionState.value
+        if (current is NavigationSessionState.Interrupted &&
+            current.reason == InterruptionReason.GUIDANCE_PAUSED
+        ) {
+            resume()
+        }
+    }
+
+    companion object {
+        internal const val BACKGROUND_GRACE_MILLIS = 30_000L
     }
 }

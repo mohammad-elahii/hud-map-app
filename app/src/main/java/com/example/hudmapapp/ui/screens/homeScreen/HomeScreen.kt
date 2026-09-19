@@ -51,7 +51,6 @@ import com.example.hudmapapp.HudMapApplication
 import com.example.hudmapapp.navigation.NavigationInitState
 import com.example.hudmapapp.navigation.NavigationSessionCoordinator
 import com.example.hudmapapp.navigation.NavigationSessionState
-import com.example.hudmapapp.navigation.SdkNavigatorAdapter
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.DestinationSearchState
 import com.example.hudmapapp.data.model.RoutePreview
@@ -83,6 +82,11 @@ fun HomeScreen(
         factory = HomeViewModel.Factory(
             LocalContext.current.applicationContext,
             BuildConfig.MAPS_API_KEY
+        )
+    ),
+    sessionCoordinator: NavigationSessionCoordinator = viewModel(
+        factory = NavigationSessionCoordinator.Factory(
+            (LocalContext.current.applicationContext as HudMapApplication).navigationManager
         )
     ),
     map: @Composable (
@@ -136,28 +140,24 @@ fun HomeScreen(
 
     val navigationInitState by navigationManager.initState.collectAsState()
 
-    val sessionCoordinator = remember {
-        NavigationSessionCoordinator(
-            adapterProvider = {
-                val state = navigationManager.initState.value
-                if (state is NavigationInitState.Ready) {
-                    SdkNavigatorAdapter(state.navigator)
-                } else {
-                    null
-                }
-            }
-        )
-    }
     val sessionState by sessionCoordinator.sessionState.collectAsState()
+    val navigationState by sessionCoordinator.navigationState.collectAsState()
 
     LaunchedEffect(Unit) {
         navigationManager.initialize(context.applicationContext as HudMapApplication)
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                sessionCoordinator.onAppBackgrounded()
+            } else if (event == Lifecycle.Event.ON_START) {
+                sessionCoordinator.onAppForegrounded()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
-            sessionCoordinator.stopNavigation()
-            navigationManager.shutdown()
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -481,6 +481,7 @@ fun HomeScreen(
                 ) {
                     NavigationSessionBanner(
                         sessionState = activeSession,
+                        navigationState = navigationState,
                         onStop = {
                             sessionCoordinator.stopNavigation()
                             viewModel.clearDestination()

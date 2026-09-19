@@ -13,6 +13,7 @@ import com.google.android.libraries.navigation.Navigator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -458,5 +459,78 @@ class NavigationSessionTest {
             assertTrue(!message!!.contains("SOME_RAW_STATUS"))
             assertTrue(!message.contains("Navigator"))
         }
+    }
+
+    @Test
+    fun `background then quick foreground keeps session active`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        coordinator.onAppBackgrounded()
+        advanceTimeBy(5_000)
+        coordinator.onAppForegrounded()
+        advanceUntilIdle()
+
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+    }
+
+    @Test
+    fun `background past grace period pauses with resume`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        coordinator.onAppBackgrounded()
+        advanceTimeBy(31_000)
+        advanceUntilIdle()
+
+        val interrupted = coordinator.sessionState.value
+        assertTrue(
+            interrupted is NavigationSessionState.Interrupted &&
+                interrupted.reason ==
+                com.example.hudmapapp.navigation.InterruptionReason.GUIDANCE_PAUSED
+        )
+
+        coordinator.onAppForegrounded()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+        assertEquals(1, fake.setDestinationsCalls)
+    }
+
+    @Test
+    fun `background with no session does nothing`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.onAppBackgrounded()
+        advanceTimeBy(31_000)
+        advanceUntilIdle()
+
+        assertEquals(NavigationSessionState.Idle, coordinator.sessionState.value)
+    }
+
+    @Test
+    fun `live banner formatters produce driver-safe lines`() {
+        assertEquals(
+            "300 m",
+            com.example.hudmapapp.ui.screens.homeScreen.formatLiveDistance(300)
+        )
+        assertEquals(
+            "1.2 km",
+            com.example.hudmapapp.ui.screens.homeScreen.formatLiveDistance(1200)
+        )
+        assertEquals(
+            "13.9 km · 33 min left",
+            com.example.hudmapapp.ui.screens.homeScreen.liveEtaLine(13904, 2038L)
+        )
+        assertEquals(
+            null,
+            com.example.hudmapapp.ui.screens.homeScreen.liveEtaLine(null, null)
+        )
     }
 }
