@@ -51,6 +51,8 @@ import com.example.hudmapapp.HudMapApplication
 import com.example.hudmapapp.navigation.NavigationInitState
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.DestinationSearchState
+import com.example.hudmapapp.data.model.RoutePreview
+import com.example.hudmapapp.data.model.RoutePreviewState
 import com.example.hudmapapp.data.model.SelectedDestinationState
 import com.example.hudmapapp.data.repository.DestinationRepository
 import com.example.hudmapapp.location.FusedLocationProvider
@@ -74,15 +76,37 @@ import kotlinx.coroutines.launch
 @Composable
 fun HomeScreen(
     navController: NavController,
-    viewModel: HomeViewModel = viewModel(),
-    map: @Composable (AppLocation?, Int, SelectedDestinationState) -> Unit = { loc, trigger, selected ->
-        HomeMapView(currentLocation = loc, recenterTrigger = trigger, selectedDestination = selected)
-    }
+    viewModel: HomeViewModel = viewModel(
+        factory = HomeViewModel.Factory(
+            LocalContext.current.applicationContext,
+            BuildConfig.MAPS_API_KEY
+        )
+    ),
+    map: @Composable (
+        AppLocation?,
+        Int,
+        SelectedDestinationState,
+        List<RoutePreview>,
+        String?,
+        (String) -> Unit
+    ) -> Unit = { loc, trigger, selected, routes, selectedRouteId, onRouteSelected ->
+        HomeMapView(
+            currentLocation = loc,
+            recenterTrigger = trigger,
+            selectedDestination = selected,
+            routePreviews = routes,
+            selectedRouteId = selectedRouteId,
+            onRouteSelected = onRouteSelected
+        )
+    },
+    onStartNavigation: (RoutePreview) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val selectedDestination by viewModel.selectedDestination.collectAsState()
+    val routePreviewState by viewModel.routePreviewState.collectAsState()
+    val selectedRoute by viewModel.selectedRoute.collectAsState()
 
     var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
@@ -213,6 +237,7 @@ fun HomeScreen(
     }
 
     fun onDestinationSelected(destination: Destination) {
+        viewModel.clearRoutePreview()
         viewModel.selectDestination(destination)
         searchQuery = destination.name
         searchState = DestinationSearchState.Idle
@@ -246,7 +271,20 @@ fun HomeScreen(
                     .padding(innerPadding)
             ) {
 
-                map(currentLocation, recenterTrigger, selectedDestination)
+                val previewRoutes = when (routePreviewState) {
+                    is RoutePreviewState.Available ->
+                        (routePreviewState as RoutePreviewState.Available).routes
+                    else -> emptyList()
+                }
+
+                map(
+                    currentLocation,
+                    recenterTrigger,
+                    selectedDestination,
+                    previewRoutes,
+                    selectedRoute?.id,
+                    { routeId -> viewModel.selectRoute(routeId) }
+                )
 
                 HomeTopBar(
                     modifier = Modifier
@@ -371,12 +409,33 @@ fun HomeScreen(
                 val dest = (selectedDestination as SelectedDestinationState.Selected).destination
                 DestinationBottomSheet(
                     destination = dest,
-                    onConfirm = { viewModel.confirmDestination() },
+                    onConfirm = {
+                        viewModel.confirmDestination()
+                        viewModel.requestRoutePreview(
+                            originLatitude = currentLocation?.latitude,
+                            originLongitude = currentLocation?.longitude
+                        )
+                    },
                     onClear = {
                         viewModel.clearDestination()
                         searchQuery = ""
                     },
                     onDismiss = { viewModel.clearDestination() }
+                )
+            }
+
+            if (selectedDestination is SelectedDestinationState.Confirmed) {
+                val dest = (selectedDestination as SelectedDestinationState.Confirmed).destination
+                RoutePreviewSheet(
+                    destination = dest,
+                    routePreviewState = routePreviewState,
+                    selectedRoute = selectedRoute,
+                    onRouteSelected = { routeId -> viewModel.selectRoute(routeId) },
+                    onStartNavigation = { route -> onStartNavigation(route) },
+                    onDismiss = {
+                        viewModel.clearDestination()
+                        searchQuery = ""
+                    }
                 )
             }
         }
@@ -463,6 +522,7 @@ private fun MapControlButton(
 @Composable
 private fun HomeScreenPreview() {
     HomeScreen(
-        navController = rememberNavController()
+        navController = rememberNavController(),
+        map = { _, _, _, _, _, _ -> }
     )
 }

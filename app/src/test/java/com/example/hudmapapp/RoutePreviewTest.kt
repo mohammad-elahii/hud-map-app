@@ -4,6 +4,7 @@ import com.example.hudmapapp.data.model.RouteCoordinate
 import com.example.hudmapapp.data.model.RoutePreview
 import com.example.hudmapapp.data.model.RoutePreviewError
 import com.example.hudmapapp.data.model.RoutePreviewState
+import com.example.hudmapapp.data.repository.RouteLogger
 import com.example.hudmapapp.data.repository.RoutePlanningDataSource
 import com.example.hudmapapp.data.repository.RoutePlanningRepository
 import com.example.hudmapapp.data.repository.RoutePlanningResult
@@ -23,6 +24,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+
+private val noopLogger = RouteLogger.noop()
 
 private fun preview(id: String) = RoutePreview(
     id = id,
@@ -52,7 +55,7 @@ class RoutePreviewTest {
         val repository = RoutePlanningRepository(
             RoutePlanningDataSource { RoutePlanningResult.Success(listOf(preview("r1"), preview("r2"))) }
         )
-        val coordinator = RoutePreviewCoordinator(repository)
+        val coordinator = RoutePreviewCoordinator(repository, noopLogger)
 
         coordinator.requestRoutePreview(36.29, 59.59, 36.30, 59.60)
         advanceUntilIdle()
@@ -68,7 +71,7 @@ class RoutePreviewTest {
         val repository = RoutePlanningRepository(
             RoutePlanningDataSource { RoutePlanningResult.Empty }
         )
-        val coordinator = RoutePreviewCoordinator(repository)
+        val coordinator = RoutePreviewCoordinator(repository, noopLogger)
 
         coordinator.requestRoutePreview(36.29, 59.59, 36.30, 59.60)
         advanceUntilIdle()
@@ -90,7 +93,7 @@ class RoutePreviewTest {
             val repository = RoutePlanningRepository(
                 RoutePlanningDataSource { RoutePlanningResult.Failure(error) }
             )
-            val coordinator = RoutePreviewCoordinator(repository)
+            val coordinator = RoutePreviewCoordinator(repository, noopLogger)
             coordinator.requestRoutePreview(36.29, 59.59, 36.30, 59.60)
             advanceUntilIdle()
             assertEquals(RoutePreviewState.Error(error), coordinator.routePreviewState.value)
@@ -138,7 +141,7 @@ class RoutePreviewTest {
                 }
             }
         )
-        val coordinator = RoutePreviewCoordinator(repository)
+        val coordinator = RoutePreviewCoordinator(repository, noopLogger)
 
         coordinator.requestRoutePreview(36.29, 59.59, 41.0, 59.60)
         advanceTimeBy(100)
