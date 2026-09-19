@@ -1,4 +1,4 @@
-# Phase 3 Test Notes — Route Preview & Navigation Session Foundation
+# Phase 3–4 Test Notes — Route Preview, Session & Guidance Verification
 
 Automated coverage lives in `app/src/test` (JVM unit) and `app/src/androidTest`
 (Compose). Everything runs with the project's standard commands and requires
@@ -13,8 +13,11 @@ no API key or live Google service.
 | Destination select → confirm → preview → select → clear | `HomeViewModelTest` | Fake repository through `RoutePreviewCoordinator` |
 | Session start, duplicate prevention, stop, cleanup, stale callback | `NavigationSessionTest`, `NavigationInitTest` | `FakeNavigatorAdapter` / `InitFakeAdapter` |
 | Rerouting, off-route, interruption, resume, retry, arrival/stop freeze | `NavigationSessionTest` | Fake SDK event firing |
+| Final/non-final arrival, mid-session reroute chain, stale arrival, double stop, feed bracketing | `NavigationSessionTest` | `arrivalTarget.onArrival(Boolean)` — real `ArrivalEvent` cannot be constructed on JVM (final class, native `Waypoint`) |
 | Guidance mapping, maneuver changes, fallbacks, user-safe messages | `NavigationStateTest` | `fakeGuidance()` snapshots |
+| Feed ticks, stop-clears-feed, null-snapshot fallback, simulator delegation | `NavigationStateTest` | Scripted `GuidanceSnapshot` sequences via fake feed |
 | Sheet loading / empty / error / selection / confirm | `RoutePreviewSheetTest` (androidTest) | Compose rule with canned models |
+| Banner Active / Rerouting / OffRoute / Interrupted / Error, Retry / Resume / Stop callbacks | `NavigationSessionBannerTest` (androidTest) | Compose rule with canned session + guidance state |
 
 ## 4.1 live guidance feed — approach decision
 
@@ -57,17 +60,43 @@ the active session only:
 7. Turn-by-turn `Maneuver` int codes are stable across SDK minor versions; unknown
    codes map to `ManeuverType.UNKNOWN` rather than failing.
 
+## Simulator-based emulator verification (no driving needed)
+
+1. Build and install on a Play-Services emulator image:
+   `gradlew installDebug`.
+2. Grant location permission; in extended controls set a route (e.g. two points
+   ~10 km apart) and confirm the destination so route previews load.
+3. Start navigation, then trigger the simulator from an `adb shell` debug hook
+   or a temporary debug button calling
+   `sessionCoordinator.startSimulator(5f)` — the SDK replays locations along
+   the existing route at 5x.
+4. Watch the banner: maneuver instruction, distance-to-maneuver, remaining
+   distance / ETA update every ~2 s from the same `readGuidance()` path as a
+   real drive.
+5. Background the app 30+ s: banner pauses to Interrupted; foreground resumes.
+6. `stopSimulator()` is not exposed in UI — ending the session via Stop also
+   ends simulation when destinations clear.
+
 ## Manual / live-device checklist (not in CI)
+
+### Route preview (Phase 3)
 
 - [ ] Real device with Play Services: confirm destination → routes render on map.
 - [ ] Select each candidate route: highlight + sheet state stay in sync.
-- [ ] Start navigation: real guidance begins, banner shows destination + summary.
-- [ ] Drive off-route: banner shows recalculating, then recovers to active.
-- [ ] Airplane mode mid-session: interruption state appears, resume works.
-- [ ] Arrive at destination: arrived state, no further guidance updates.
-- [ ] Stop mid-session: listeners released (no leak warnings in logcat).
 - [ ] Deny location permission: SDK init error surfaces typed error, no crash.
 - [ ] Invalid key / Routes API disabled: classified auth error, retry works.
+
+### Active session (Phase 4)
+
+- [ ] Start: real guidance begins, banner shows maneuver + distance + ETA.
+- [ ] Follow: values update while moving; maneuver advances at turns.
+- [ ] Off-route: banner shows recalculating, recovers to Active with new maneuver.
+- [ ] Airplane mode mid-session: interruption appears, resume works on reconnect.
+- [ ] Arrival: arrived state, no further updates, listeners released.
+- [ ] Stop mid-session: Stopped state, map usable, no leaks in logcat.
+- [ ] Rotation during Active: session survives, no duplicate.
+- [ ] Background 30 s then return: pauses per #55 policy, resumes on return.
+- [ ] Permission revoked mid-session: typed error, no crash.
 
 ## Standard commands
 

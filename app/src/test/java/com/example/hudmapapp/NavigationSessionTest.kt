@@ -153,6 +153,20 @@ private class FakeNavigatorAdapter(
     fun fireProgress() {
         progressListeners.toList().forEach { it.onRemainingTimeOrDistanceChanged() }
     }
+
+    var arrivalTarget: NavigationSessionCoordinator? = null
+
+    fun fireArrivalFinal() {
+        arrivalTarget?.onArrival(true)
+    }
+
+    fun fireArrivalNonFinal() {
+        arrivalTarget?.onArrival(false)
+    }
+
+    fun totalListenerCount() =
+        arrivalListeners.size + routeChangedListeners.size +
+            progressListeners.size + reroutingListeners.size
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -512,6 +526,129 @@ class NavigationSessionTest {
         advanceUntilIdle()
 
         assertEquals(NavigationSessionState.Idle, coordinator.sessionState.value)
+    }
+
+    @Test
+    fun `final arrival freezes session and releases everything`() =
+        runTest(testDispatcher) {
+            val fake = FakeNavigatorAdapter()
+            val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+            coordinator.startNavigation(destination(), route())
+            advanceUntilIdle()
+            assertEquals(4, fake.totalListenerCount())
+            fake.arrivalTarget = coordinator
+
+            fake.fireArrivalFinal()
+            advanceUntilIdle()
+
+            assertEquals(NavigationSessionState.Arrived, coordinator.sessionState.value)
+            assertEquals(
+                com.example.hudmapapp.navigation.GuidanceStatus.ARRIVED,
+                coordinator.navigationState.value.status
+            )
+            assertEquals(0, fake.totalListenerCount())
+
+            fake.fireRerouting()
+            fake.fireRouteChanged()
+            fake.fireProgress()
+            advanceUntilIdle()
+            assertEquals(NavigationSessionState.Arrived, coordinator.sessionState.value)
+        }
+
+    @Test
+    fun `non-final arrival does not end session`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        fake.arrivalTarget = coordinator
+
+        fake.fireArrivalNonFinal()
+        advanceUntilIdle()
+
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+        assertEquals(4, fake.totalListenerCount())
+    }
+
+    @Test
+    fun `mid-session reroute resolves with fresh maneuver`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        fake.fireRerouting()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.OffRoute)
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.OFF_ROUTE,
+            coordinator.navigationState.value.status
+        )
+
+        coordinator.onRerouteResolved()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Rerouting)
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.REROUTING,
+            coordinator.navigationState.value.status
+        )
+
+        fake.fireRouteChanged()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+        assertEquals(1, fake.setDestinationsCalls)
+    }
+
+    @Test
+    fun `stale arrival after stop is ignored`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        fake.arrivalTarget = coordinator
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+
+        fake.fireArrivalFinal()
+        fake.fireRerouting()
+        advanceUntilIdle()
+
+        assertEquals(NavigationSessionState.Stopped, coordinator.sessionState.value)
+    }
+
+    @Test
+    fun `second stop is a no-op without duplicate sdk calls`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+
+        assertEquals(1, fake.stopGuidanceCalls)
+        assertEquals(1, fake.clearDestinationsCalls)
+        assertEquals(1, fake.feedStopCalls)
+    }
+
+    @Test
+    fun `feed start and stop bracket the session exactly once`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        assertEquals(1, fake.feedStartCalls)
+
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+        assertEquals(1, fake.feedStopCalls)
     }
 
     @Test
