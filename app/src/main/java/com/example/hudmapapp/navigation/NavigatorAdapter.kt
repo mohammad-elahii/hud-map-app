@@ -37,6 +37,12 @@ interface NavigatorAdapter {
 
     fun removeReroutingListener(listener: Navigator.ReroutingListener)
 
+    fun startGuidanceFeed(onUpdate: () -> Unit): Boolean
+
+    fun stopGuidanceFeed()
+
+    fun startSimulator(speedMultiplier: Float = 5f): Boolean
+
     fun readGuidance(): GuidanceSnapshot?
 
     fun isGuidanceRunning(): Boolean
@@ -119,19 +125,65 @@ class SdkNavigatorAdapter(
         navigator.removeReroutingListener(listener)
     }
 
-    override fun readGuidance(): GuidanceSnapshot? {
+    override fun startGuidanceFeed(onUpdate: () -> Unit): Boolean {
+        stopGuidanceFeed()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val task = object : Runnable {
+            override fun run() {
+                try {
+                    onUpdate()
+                } finally {
+                    feedHandler?.postDelayed(this, FEED_INTERVAL_MILLIS)
+                }
+            }
+        }
+        feedHandler = handler
+        feedTask = task
+        handler.postDelayed(task, FEED_INITIAL_DELAY_MILLIS)
+        return true
+    }
+
+    override fun stopGuidanceFeed() {
+        feedTask?.let { feedHandler?.removeCallbacks(it) }
+        feedTask = null
+        feedHandler = null
+        stopTurnByTurnService()
+    }
+
+    override fun startSimulator(speedMultiplier: Float): Boolean {
         return try {
-            val segments = navigator.getRouteSegments()
-            val current = segments.firstOrNull() ?: return null
+            val options = com.google.android.libraries.navigation.SimulationOptions()
+                .speedMultiplier(speedMultiplier)
+            navigator.simulator.simulateLocationsAlongExistingRoute(options)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun stopSimulator() {
+        try {
+            val simulator = navigator.simulator
+            simulator.javaClass.methods
+                .firstOrNull { it.name == "stopSimulation" }
+                ?.invoke(simulator)
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun readGuidance(): GuidanceSnapshot? {
+        readTurnByTurn()?.let { return it }
+        return try {
             val times = navigator.getTimeAndDistanceList()
             val currentTime = times.firstOrNull()
+            if (currentTime == null) return null
             GuidanceSnapshot(
                 currentStep = null,
                 nextStep = null,
                 distanceToManeuverMeters = null,
                 timeToManeuverSeconds = null,
-                remainingDistanceMeters = currentTime?.meters,
-                remainingDurationSeconds = currentTime?.seconds?.toLong(),
+                remainingDistanceMeters = currentTime.meters,
+                remainingDurationSeconds = currentTime.seconds.toLong(),
                 routeChanged = false
             )
         } catch (_: Exception) {
@@ -139,9 +191,57 @@ class SdkNavigatorAdapter(
         }
     }
 
+    private var turnService: Any? = null
+
+    fun startTurnByTurnService(packageName: String, serviceName: String): Boolean {
+        return try {
+            val optionsClass = Class.forName(
+                "com.google.android.libraries.navigation.NavigationUpdatesOptions"
+            )
+            val builderMethod = optionsClass.getMethod("builder")
+            val builder = builderMethod.invoke(null)
+            val builderClass = builder.javaClass
+            builderClass.getMethod("setNumNextStepsToPreview", Int::class.javaPrimitiveType)
+                .invoke(builder, 1)
+            val options = builderClass.getMethod("build").invoke(builder)
+            val method = navigator.javaClass.getMethod(
+                "registerServiceForNavUpdates",
+                String::class.java,
+                String::class.java,
+                optionsClass
+            )
+            turnServiceRegistered = method.invoke(navigator, packageName, serviceName, options) as? Boolean
+                ?: false
+            turnServiceRegistered
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private var turnServiceRegistered = false
+
+    fun stopTurnByTurnService() {
+        if (!turnServiceRegistered) return
+        try {
+            navigator.javaClass.getMethod("unregisterServiceForNavUpdates").invoke(navigator)
+        } catch (_: Exception) {
+        }
+        turnServiceRegistered = false
+    }
+
+    private fun readTurnByTurn(): GuidanceSnapshot? {
+        return turnService?.let { mapNavInfo(it) }
+    }
+
+    private var feedHandler: android.os.Handler? = null
+    private var feedTask: Runnable? = null
+
     override fun isGuidanceRunning(): Boolean = navigator.isGuidanceRunning()
 
     companion object {
+        internal const val FEED_INTERVAL_MILLIS = 2_000L
+        internal const val FEED_INITIAL_DELAY_MILLIS = 1_000L
+
         internal fun waypointFor(destination: Destination): Waypoint {
             val builder = Waypoint.builder().setTitle(destination.name)
             if (destination.placeId.isNotBlank()) {

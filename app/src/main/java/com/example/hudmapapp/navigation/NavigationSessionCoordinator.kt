@@ -127,7 +127,31 @@ class NavigationSessionCoordinator(
                 NavigationState(status = GuidanceStatus.ACTIVE),
                 provided.readGuidance()
             )
+            provided.startGuidanceFeed {
+                onFeedTick(sequence)
+            }
         }
+    }
+
+    fun startSimulator(speedMultiplier: Float = 5f): Boolean {
+        val target = adapter ?: return false
+        return target.startSimulator(speedMultiplier)
+    }
+
+    private fun onFeedTick(sequence: Long) {
+        if (sequence != sessionSequence) return
+        val current = _sessionState.value
+        if (current !is NavigationSessionState.Active &&
+            current !is NavigationSessionState.Rerouting &&
+            current !is NavigationSessionState.OffRoute
+        ) {
+            return
+        }
+        _navigationState.value = applyGuidance(
+            _navigationState.value,
+            adapter?.readGuidance(),
+            status = _navigationState.value.status
+        )
     }
 
     fun stopNavigation() {
@@ -140,6 +164,10 @@ class NavigationSessionCoordinator(
         }
         _sessionState.value = NavigationSessionState.Stopping
         sessionSequence++
+        try {
+            adapter?.stopGuidanceFeed()
+        } catch (_: Exception) {
+        }
         try {
             adapter?.stopGuidance()
             adapter?.clearDestinations()
@@ -156,6 +184,10 @@ class NavigationSessionCoordinator(
 
     fun onClearedSession() {
         sessionSequence++
+        try {
+            adapter?.stopGuidanceFeed()
+        } catch (_: Exception) {
+        }
         unregisterListeners()
         adapter = null
     }
