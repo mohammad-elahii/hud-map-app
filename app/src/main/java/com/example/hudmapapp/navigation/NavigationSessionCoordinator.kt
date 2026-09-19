@@ -54,7 +54,7 @@ class NavigationSessionCoordinator(
     val navigationState: StateFlow<NavigationState> = _navigationState.asStateFlow()
 
     private val arrivalListener = Navigator.ArrivalListener { event ->
-        onArrival(event)
+        onArrival(event.isFinalDestination)
     }
     private val routeChangedListener = Navigator.RouteChangedListener {
         onRouteChanged()
@@ -312,9 +312,13 @@ class NavigationSessionCoordinator(
         }
     }
 
-    private fun onArrival(event: ArrivalEvent) {
+    internal fun onArrival(event: ArrivalEvent) {
+        onArrival(event.isFinalDestination)
+    }
+
+    internal fun onArrival(isFinalDestination: Boolean) {
         val current = activeDestination() ?: return
-        if (!event.isFinal()) return
+        if (!isFinalDestination) return
         logger.debug("navigation session arrived")
         unregisterListeners()
         adapter = null
