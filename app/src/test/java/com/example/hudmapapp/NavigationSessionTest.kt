@@ -53,6 +53,9 @@ private class FakeNavigatorAdapter(
     var guidanceRunning = false
     private val arrivalListeners = mutableListOf<Navigator.ArrivalListener>()
     private val routeChangedListeners = mutableListOf<Navigator.RouteChangedListener>()
+    private val progressListeners =
+        mutableListOf<Navigator.RemainingTimeOrDistanceChangedListener>()
+    private val reroutingListeners = mutableListOf<Navigator.ReroutingListener>()
 
     override fun setDestinations(
         destination: Destination,
@@ -97,17 +100,21 @@ private class FakeNavigatorAdapter(
     override fun addRemainingTimeOrDistanceChangedListener(
         listener: Navigator.RemainingTimeOrDistanceChangedListener
     ) {
+        progressListeners.add(listener)
     }
 
     override fun removeRemainingTimeOrDistanceChangedListener(
         listener: Navigator.RemainingTimeOrDistanceChangedListener
     ) {
+        progressListeners.remove(listener)
     }
 
     override fun addReroutingListener(listener: Navigator.ReroutingListener) {
+        reroutingListeners.add(listener)
     }
 
     override fun removeReroutingListener(listener: Navigator.ReroutingListener) {
+        reroutingListeners.remove(listener)
     }
 
     override fun readGuidance(): com.example.hudmapapp.navigation.GuidanceSnapshot? = null
@@ -115,6 +122,22 @@ private class FakeNavigatorAdapter(
     override fun isGuidanceRunning(): Boolean = guidanceRunning
 
     fun arrivalListenerCount() = arrivalListeners.size
+
+    fun progressListenerCount() = progressListeners.size
+
+    fun reroutingListenerCount() = reroutingListeners.size
+
+    fun fireRerouting() {
+        reroutingListeners.toList().forEach { it.onReroutingRequestedByOffRoute() }
+    }
+
+    fun fireRouteChanged() {
+        routeChangedListeners.toList().forEach { it.onRouteChanged() }
+    }
+
+    fun fireProgress() {
+        progressListeners.toList().forEach { it.onRemainingTimeOrDistanceChanged() }
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -267,5 +290,159 @@ class NavigationSessionTest {
         coordinator.startNavigation(destination(), route())
         advanceUntilIdle()
         assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+    }
+
+    @Test
+    fun `off-route then route change recovers to active`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        fake.fireRerouting()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.OffRoute)
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.OFF_ROUTE,
+            coordinator.navigationState.value.status
+        )
+
+        fake.fireRouteChanged()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.ACTIVE,
+            coordinator.navigationState.value.status
+        )
+    }
+
+    @Test
+    fun `network failure during start maps to network error`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter(routeStatus = Navigator.RouteStatus.NETWORK_ERROR)
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        assertEquals(
+            NavigationSessionState.Error(NavigationSessionError.NetworkError),
+            coordinator.sessionState.value
+        )
+    }
+
+    @Test
+    fun `location interruption recovers with resume`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        coordinator.notifyLocationUnavailable()
+        advanceUntilIdle()
+        val interrupted = coordinator.sessionState.value
+        assertTrue(
+            interrupted is NavigationSessionState.Interrupted &&
+                interrupted.reason ==
+                com.example.hudmapapp.navigation.InterruptionReason.LOCATION_UNAVAILABLE
+        )
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.INTERRUPTED,
+            coordinator.navigationState.value.status
+        )
+
+        coordinator.resume()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+    }
+
+    @Test
+    fun `network interruption recovers with resume`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        coordinator.notifyNetworkLost()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Interrupted)
+
+        coordinator.resume()
+        advanceUntilIdle()
+        assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+        assertEquals(1, fake.setDestinationsCalls)
+    }
+
+    @Test
+    fun `retry after error restarts without duplicate listeners`() =
+        runTest(testDispatcher) {
+            val fake = FakeNavigatorAdapter(
+                routeStatus = Navigator.RouteStatus.NETWORK_ERROR
+            )
+            val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+            coordinator.startNavigation(destination(), route())
+            advanceUntilIdle()
+            assertTrue(coordinator.sessionState.value is NavigationSessionState.Error)
+
+            fake.routeStatus = Navigator.RouteStatus.OK
+            coordinator.retryStart()
+            advanceUntilIdle()
+
+            assertTrue(coordinator.sessionState.value is NavigationSessionState.Active)
+            assertEquals(2, fake.setDestinationsCalls)
+            assertEquals(1, fake.arrivalListenerCount())
+            assertEquals(1, fake.progressListenerCount())
+            assertEquals(1, fake.reroutingListenerCount())
+        }
+
+    @Test
+    fun `arrived state blocks further guidance updates`() = runTest(testDispatcher) {
+        val fake = FakeNavigatorAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+
+        fake.fireRerouting()
+        fake.fireRouteChanged()
+        fake.fireProgress()
+        advanceUntilIdle()
+
+        assertEquals(NavigationSessionState.Stopped, coordinator.sessionState.value)
+        assertEquals(
+            com.example.hudmapapp.navigation.GuidanceStatus.STOPPED,
+            coordinator.navigationState.value.status
+        )
+    }
+
+    @Test
+    fun `user messages never expose raw sdk internals`() = runTest(testDispatcher) {
+        val states = listOf(
+            NavigationSessionState.Error(NavigationSessionError.NavigatorNotReady),
+            NavigationSessionState.Error(
+                NavigationSessionError.RouteFailed("SOME_RAW_STATUS")
+            ),
+            NavigationSessionState.Error(NavigationSessionError.NetworkError),
+            NavigationSessionState.Error(NavigationSessionError.LocationUnavailable),
+            NavigationSessionState.Error(NavigationSessionError.Unknown),
+            NavigationSessionState.OffRoute(destination(), route()),
+            NavigationSessionState.Rerouting(destination(), route()),
+            NavigationSessionState.Interrupted(
+                destination(), route(),
+                com.example.hudmapapp.navigation.InterruptionReason.LOCATION_UNAVAILABLE
+            ),
+            NavigationSessionState.Arrived
+        )
+        for (state in states) {
+            val message = com.example.hudmapapp.navigation.userMessageFor(state)
+            assertTrue(!message.isNullOrBlank())
+            assertTrue(!message!!.contains("SOME_RAW_STATUS"))
+            assertTrue(!message.contains("Navigator"))
+        }
     }
 }

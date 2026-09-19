@@ -444,7 +444,10 @@ fun HomeScreen(
 
             if (selectedDestination is SelectedDestinationState.Confirmed &&
                 sessionState !is NavigationSessionState.Active &&
-                sessionState !is NavigationSessionState.Starting
+                sessionState !is NavigationSessionState.Starting &&
+                sessionState !is NavigationSessionState.Rerouting &&
+                sessionState !is NavigationSessionState.OffRoute &&
+                sessionState !is NavigationSessionState.Interrupted
             ) {
                 val dest = (selectedDestination as SelectedDestinationState.Confirmed).destination
                 RoutePreviewSheet(
@@ -466,6 +469,9 @@ fun HomeScreen(
             val activeSession = when (val session = sessionState) {
                 is NavigationSessionState.Active -> session
                 is NavigationSessionState.Starting -> session
+                is NavigationSessionState.Rerouting -> session
+                is NavigationSessionState.OffRoute -> session
+                is NavigationSessionState.Interrupted -> session
                 else -> null
             }
             if (activeSession != null) {
@@ -480,6 +486,27 @@ fun HomeScreen(
                             viewModel.clearDestination()
                             searchQuery = ""
                         },
+                        onRetry = { sessionCoordinator.retryStart() },
+                        onResume = { sessionCoordinator.resume() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            val sessionError = sessionState as? NavigationSessionState.Error
+            if (sessionError != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    NavigationSessionBanner(
+                        sessionState = sessionError,
+                        onStop = {
+                            sessionCoordinator.stopNavigation()
+                            viewModel.clearDestination()
+                            searchQuery = ""
+                        },
+                        onRetry = { sessionCoordinator.retryStart() },
+                        onResume = { sessionCoordinator.resume() },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

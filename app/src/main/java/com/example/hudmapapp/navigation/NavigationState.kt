@@ -40,6 +40,7 @@ enum class GuidanceStatus {
     ACTIVE,
     REROUTING,
     OFF_ROUTE,
+    INTERRUPTED,
     ARRIVED,
     STOPPED,
     ERROR
