@@ -119,6 +119,12 @@ private class InitFakeAdapter(
 
     override fun isGuidanceRunning(): Boolean = running
 
+    override fun startGuidanceFeed(onUpdate: () -> Unit): Boolean = true
+
+    override fun stopGuidanceFeed() {}
+
+    override fun startSimulator(speedMultiplier: Float): Boolean = true
+
     fun listenerCount() = arrivals.size + routeChanges.size + progress.size + reroutes.size
 }
 

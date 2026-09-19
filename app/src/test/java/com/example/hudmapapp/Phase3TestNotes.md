@@ -16,6 +16,30 @@ no API key or live Google service.
 | Guidance mapping, maneuver changes, fallbacks, user-safe messages | `NavigationStateTest` | `fakeGuidance()` snapshots |
 | Sheet loading / empty / error / selection / confirm | `RoutePreviewSheetTest` (androidTest) | Compose rule with canned models |
 
+## 4.1 live guidance feed — approach decision
+
+`registerServiceForNavUpdates` exists in 7.6.1 but is marked Preview, requires a
+bound `Messenger` service, and delivers `NavInfo` bundles only to that service —
+heavy machinery for an in-app HUD feed. The implemented approach is a main-thread
+2s poll (`FEED_INTERVAL_MILLIS`, 1s initial delay) calling `readGuidance()` on
+the active session only:
+
+- `readGuidance()` first tries turn-by-turn `NavInfo` mapping (`mapNavInfo` via
+  reflection over `getCurrentStep` / `getRemainingSteps` /
+  `getDistanceToCurrentStepMeters` / `getTimeToFinalDestinationSeconds` /
+  `getRouteChanged`), then falls back to `getTimeAndDistanceList()`.
+- Reflection (not direct references) keeps `turnbyturn` out of the compile
+  boundary: if Google renames those getters, mapping returns null and the
+  fallback applies instead of crashing.
+- Ticks are sequence-guarded and ignored unless the session is Active /
+  Rerouting / OffRoute; the feed stops on stop / arrival / clear.
+- `startSimulator(speedMultiplier)` wraps
+  `navigator.simulator.simulateLocationsAlongExistingRoute()` for emulator runs:
+  start a session, call `coordinator.startSimulator()`, and the same poll feeds
+  real SDK snapshots without driving.
+- Battery note: 2s main-thread reads of two SDK getters is cheaper than a
+  1Hz service + IPC; revisit if HUD needs sub-second maneuver flips.
+
 ## Navigation SDK integration assumptions (fakes stand in for these)
 
 1. `Navigator.setDestinations()` resolves its `ListenableResultFuture<RouteStatus>`

@@ -121,6 +121,20 @@ private class FakeNavigatorAdapter(
 
     override fun isGuidanceRunning(): Boolean = guidanceRunning
 
+    var feedStartCalls = 0
+    var feedStopCalls = 0
+
+    override fun startGuidanceFeed(onUpdate: () -> Unit): Boolean {
+        feedStartCalls++
+        return true
+    }
+
+    override fun stopGuidanceFeed() {
+        feedStopCalls++
+    }
+
+    override fun startSimulator(speedMultiplier: Float): Boolean = true
+
     fun arrivalListenerCount() = arrivalListeners.size
 
     fun progressListenerCount() = progressListeners.size

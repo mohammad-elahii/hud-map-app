@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -112,6 +113,40 @@ private class GuidanceFakeAdapter(
     override fun readGuidance(): GuidanceSnapshot? = snapshot
 
     override fun isGuidanceRunning(): Boolean = true
+
+    var feedTicks = 0
+    var feedRunning = false
+    var lastFeedCallback: (() -> Unit)? = null
+    private var script: List<GuidanceSnapshot?> = emptyList()
+    private var scriptIndex = 0
+
+    fun scriptSnapshots(vararg snapshots: GuidanceSnapshot?) {
+        script = snapshots.toList()
+        scriptIndex = 0
+    }
+
+    override fun startGuidanceFeed(onUpdate: () -> Unit): Boolean {
+        feedRunning = true
+        lastFeedCallback = onUpdate
+        return true
+    }
+
+    override fun stopGuidanceFeed() {
+        feedRunning = false
+        lastFeedCallback = null
+    }
+
+    override fun startSimulator(speedMultiplier: Float): Boolean = true
+
+    fun fireFeedTick() {
+        if (!feedRunning) return
+        feedTicks++
+        if (scriptIndex < script.size) {
+            snapshot = script[scriptIndex]
+            scriptIndex++
+        }
+        lastFeedCallback?.invoke()
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -223,6 +258,78 @@ class NavigationStateTest {
             assertEquals(0, fake.reroutingListenerCount)
             assertEquals(GuidanceStatus.STOPPED, coordinator.navigationState.value.status)
         }
+
+    @Test
+    fun `feed ticks advance maneuver progression without stale data`() =
+        runTest(testDispatcher) {
+            val fake = GuidanceFakeAdapter(fakeGuidance(instruction = "Turn left"))
+            val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+            coordinator.startNavigation(destination(), route())
+            advanceUntilIdle()
+            assertTrue(fake.feedRunning)
+            assertEquals("Turn left", coordinator.navigationState.value.currentManeuver?.instruction)
+
+            fake.scriptSnapshots(
+                fakeGuidance(instruction = "Turn right", distanceToManeuverMeters = 150),
+                fakeGuidance(instruction = "Arrive", distanceToManeuverMeters = 20)
+            )
+            fake.fireFeedTick()
+            advanceUntilIdle()
+            assertEquals("Turn right", coordinator.navigationState.value.currentManeuver?.instruction)
+            assertEquals(150, coordinator.navigationState.value.progress.distanceToManeuverMeters)
+
+            fake.fireFeedTick()
+            advanceUntilIdle()
+            assertEquals("Arrive", coordinator.navigationState.value.currentManeuver?.instruction)
+            assertEquals(20, coordinator.navigationState.value.progress.distanceToManeuverMeters)
+            assertEquals(2, fake.feedTicks)
+        }
+
+    @Test
+    fun `feed stops on session stop and ignores late ticks`() = runTest(testDispatcher) {
+        val fake = GuidanceFakeAdapter(fakeGuidance(instruction = "Turn left"))
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+        coordinator.stopNavigation()
+        advanceUntilIdle()
+
+        assertFalse(fake.feedRunning)
+        fake.fireFeedTick()
+        advanceUntilIdle()
+        assertEquals(GuidanceStatus.STOPPED, coordinator.navigationState.value.status)
+    }
+
+    @Test
+    fun `null feed snapshot keeps last maneuver with unavailable flag`() =
+        runTest(testDispatcher) {
+            val fake = GuidanceFakeAdapter(fakeGuidance(instruction = "Turn left"))
+            val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+            coordinator.startNavigation(destination(), route())
+            advanceUntilIdle()
+
+            fake.scriptSnapshots(null)
+            fake.fireFeedTick()
+            advanceUntilIdle()
+
+            val state = coordinator.navigationState.value
+            assertEquals("Turn left", state.currentManeuver?.instruction)
+            assertEquals(NavigationDataError.GuidanceUnavailable, state.error)
+        }
+
+    @Test
+    fun `simulator start delegates to adapter`() = runTest(testDispatcher) {
+        val fake = GuidanceFakeAdapter()
+        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
+
+        coordinator.startNavigation(destination(), route())
+        advanceUntilIdle()
+
+        assertTrue(coordinator.startSimulator(5f))
+    }
 
     @Test
     fun `maneuver name mapping covers key turns`() {
