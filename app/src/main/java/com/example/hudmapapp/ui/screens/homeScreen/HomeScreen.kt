@@ -143,8 +143,36 @@ fun HomeScreen(
     val sessionState by sessionCoordinator.sessionState.collectAsState()
     val navigationState by sessionCoordinator.navigationState.collectAsState()
 
+    var termsDialogShown by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         navigationManager.initialize(context.applicationContext as HudMapApplication)
+    }
+
+    // Official Navigation SDK Terms & Conditions gate: show the SDK-owned
+    // dialog once when terms are unaccepted. The SDK persists acceptance
+    // itself; on accept we retry navigator init, on decline the map stays
+    // usable and the init banner below explains guidance is unavailable.
+    LaunchedEffect(navigationInitState) {
+        if (navigationInitState is NavigationInitState.TermsNotAccepted && !termsDialogShown) {
+            termsDialogShown = true
+            val activity = context as? android.app.Activity
+            if (activity != null) {
+                com.google.android.libraries.navigation.NavigationApi.showTermsAndConditionsDialog(
+                    activity,
+                    "Navigation Terms",
+                    object : com.google.android.libraries.navigation.NavigationApi.OnTermsResponseListener {
+                        override fun onTermsResponse(accepted: Boolean) {
+                            if (accepted) {
+                                navigationManager.notifyTermsAccepted(
+                                    context.applicationContext as HudMapApplication
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner) {

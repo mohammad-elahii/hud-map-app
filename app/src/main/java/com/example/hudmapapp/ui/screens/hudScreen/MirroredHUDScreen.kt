@@ -10,7 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -20,6 +19,18 @@ import com.example.hudmapapp.navigation.NavigationState
 import com.example.hudmapapp.navigation.fakeNavigationState
 import com.example.hudmapapp.ui.navigation.AppRoute
 
+/**
+ * Mirrored windshield projection of the HUD.
+ *
+ * Mirroring decision (5.4): the whole guidance layer is flipped geometrically
+ * ([graphicsLayer] `scaleX = -1f`) and NOT pre-compensated. A windshield
+ * reflection mirrors the image a second time, so the geometrically mirrored
+ * source is what reads correctly in the glass — including arrow direction.
+ * On the phone screen itself a left turn therefore renders right-mirrored;
+ * that is the projection transform, not a bug. Text mirrors with the layer
+ * for the same reason; close controls stay outside the flipped layer and
+ * remain unmirrored and tappable.
+ */
 @Composable
 fun MirroredHUDScreen(
     navController: NavController,
@@ -35,28 +46,24 @@ fun MirroredHUDScreen(
             .background(Color.Black)
     ) {
 
-        // Mirrors HUDScreen: same session state, same Idle/Stopped fallback,
-        // layer flipped for windshield projection. 5.3 wires navigationState
-        // through; 5.4 verifies mirrored arrow/text parity.
-        if (sessionState is NavigationSessionState.Idle ||
-            sessionState is NavigationSessionState.Stopped
-        ) {
-            HudIdleFallback(
-                onBackToMap = {
-                    navController.popBackStack(
-                        AppRoute.Home,
-                        inclusive = false
-                    )
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            HUDNavigationLayer(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(scaleX = -1f)
-            )
-        }
+        // Same content switch as HUDScreen; only live guidance flips (handled
+        // inside HudSessionContent via mirrorGuidance). Idle fallback and
+        // close controls stay unmirrored and tappable.
+        HudSessionContent(
+            sessionState = sessionState,
+            navigationState = navigationState,
+            onBackToMap = {
+                navController.popBackStack(
+                    AppRoute.Home,
+                    inclusive = false
+                )
+            },
+            onStop = onStop,
+            onResume = onResume,
+            onRetry = onRetry,
+            modifier = Modifier.fillMaxSize(),
+            mirrorGuidance = true
+        )
 
         HUDIconButton(
             icon = Icons.Filled.Close,
@@ -88,6 +95,7 @@ private fun MirroredHUDScreenPreview() {
 private fun MirroredHUDScreenActivePreview() {
     MirroredHUDScreen(
         navController = rememberNavController(),
+        sessionState = activeSessionForPreview(),
         navigationState = fakeNavigationState()
     )
 }
