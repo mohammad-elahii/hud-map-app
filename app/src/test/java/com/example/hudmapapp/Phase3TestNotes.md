@@ -18,6 +18,9 @@ no API key or live Google service.
 | Feed ticks, stop-clears-feed, null-snapshot fallback, simulator delegation | `NavigationStateTest` | Scripted `GuidanceSnapshot` sequences via fake feed |
 | Sheet loading / empty / error / selection / confirm | `RoutePreviewSheetTest` (androidTest) | Compose rule with canned models |
 | Banner Active / Rerouting / OffRoute / Interrupted / Error, Retry / Resume / Stop callbacks | `NavigationSessionBannerTest` (androidTest) | Compose rule with canned session + guidance state |
+| Shared location registration, cleanup, observer independence, replay, stale callbacks, failures, last-fix ordering | `location/SharedLocationProviderTest` | Android-free source fake; no Play Services or API key |
+| Optional bearing/speed metadata and platform availability mapping | `location/AppLocationTest` | Proves missing is `null` while valid zero remains available |
+| Phase 6 heading/speed normalization and immutable context defaults/equality | `domain/driving/DrivingContextStateTest` | Contract-only coverage; no sensors, fusion, or HUD behavior |
 
 ## 4.1 live guidance feed — approach decision
 

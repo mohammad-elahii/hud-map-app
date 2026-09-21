@@ -245,22 +245,29 @@ never leaks raw SDK text) live next to the states.
 ## 7. Location & permissions
 
 ```
-OS permission + GPS switch ──► FusedLocationProvider ──► AppLocation(lat,lng,accuracy,…)
-         │                                │
-         ▼                                ▼
-LocationPermissionHandler          locationState: PermissionRequired | ServicesDisabled
-(RequestMultiplePermissions,        | WaitingForFix | Available | Unavailable | Error
- rationale vs permanent-denial      | NetworkUnavailable
- dialogs)                           ▼
-                           LocationStatusBanner (dismissible card)
-                           LocationBlockOverlay (full-screen blocker)
+OS permission + GPS switch ──► FusedLocationUpdateSource (Google boundary)
+                                            │ one registration token
+                                            ▼
+                                 SharedLocationProvider (app-owned)
+                                   ├─ SharedFlow<AppLocation> (replay 1)
+                                   ├─ StateFlow<LocationState>
+                                   └─ StateFlow<Boolean> tracking
+                                            │ passive observation
+                                            ▼
+                              Home now; navigation/HUD consumers later
+
+LocationPermissionHandler drives PermissionRequired / ServicesDisabled UI;
+LocationStatusBanner and LocationBlockOverlay render the typed state.
 ```
 
 | File | Role |
 |---|---|
-| `location/AppLocation.kt` | Platform-agnostic DTO (bearing/speed default 0). |
-| `location/LocationProvider.kt` | Interface: cold `locationUpdates` flow + `locationState` + `start/stopUpdates()`. UI never touches Play Services directly. |
-| `location/FusedLocationProvider.kt` | Impl via `FusedLocationProviderClient` (5 s updates, 2 s fastest). Two parallel paths — `callbackFlow` *and* imperative callbacks (a known wart: unify before adding more consumers). |
+| `location/AppLocation.kt` | Platform-agnostic fix. Bearing/course and speed are nullable; `null` means the platform did not report the measurement, while zero remains valid north/stationary data. |
+| `location/LocationProvider.kt` | Hot/passive shared updates + typed state; only explicit `startUpdates()` / `stopUpdates()` control acquisition. |
+| `location/LocationUpdateSource.kt` | Android-free source/registration boundary used by deterministic fakes. |
+| `location/SharedLocationProvider.kt` | Application-owned single-registration coordinator. Replays the latest timestamped fix and rejects stale callbacks/generations. |
+| `location/FusedLocationProvider.kt` | Thin `FusedLocationUpdateSource` adapter (5 s updates, 2 s fastest) that owns Google callback creation/removal and honors `hasBearing()` / `hasSpeed()`. |
+| `domain/driving/DrivingContextState.kt` | Immutable Phase 6 vocabulary for normalized heading/speed, orientation, movement, source, reliability, freshness, and timestamps. Producers/fusion remain later issues. |
 | `location/LocationPermissionState.kt` | `LocationState`, `LocationBlockReason`, and OS checks (`hasLocationPermission`, `isLocationEnabled`, `isNetworkAvailable`). |
 | `location/LocationPermissionHandler.kt` | Compose permission orchestrator with rationale vs "go to Settings" branches. |
 | `location/LocationPermissionOverlay.kt` | Banner (soft problems) + overlay (hard blocks). |

@@ -1,47 +1,23 @@
 package com.example.hudmapapp.location
 
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Abstraction for obtaining device location.
- *
- * Implementations are responsible for communicating with Android location APIs
- * and exposing location data without coupling to UI or Maps.
+ * App-owned location state. Observation is hot and passive; only
+ * [startUpdates] and [stopUpdates] control the platform subscription.
  */
 interface LocationProvider {
 
-    /**
-     * A cold [Flow] that emits the device's current location whenever a new
-     * fix is available. The flow completes with an error if location
-     * acquisition fails permanently.
-     */
-    val locationUpdates: Flow<AppLocation>
+    val locationUpdates: SharedFlow<AppLocation>
 
-    /**
-     * A [StateFlow] that reflects the current location acquisition state,
-     * including errors and waiting conditions.
-     */
     val locationState: StateFlow<LocationState>
 
-    /**
-     * Returns the last known location, or `null` if no fix is available.
-     */
     suspend fun getLastLocation(): AppLocation?
 
-    /**
-     * Starts continuous location updates.
-     * Must only be called when location permission has been granted.
-     */
     fun startUpdates()
 
-    /**
-     * Stops continuous location updates.
-     */
     fun stopUpdates()
 
-    /**
-     * `true` while continuous updates are active.
-     */
-    val isTracking: Boolean
+    val isTracking: StateFlow<Boolean>
 }

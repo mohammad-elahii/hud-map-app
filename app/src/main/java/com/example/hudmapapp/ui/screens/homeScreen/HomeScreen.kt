@@ -57,7 +57,6 @@ import com.example.hudmapapp.data.model.RoutePreview
 import com.example.hudmapapp.data.model.RoutePreviewState
 import com.example.hudmapapp.data.model.SelectedDestinationState
 import com.example.hudmapapp.data.repository.DestinationRepository
-import com.example.hudmapapp.location.FusedLocationProvider
 import com.example.hudmapapp.location.LocationBlockReason
 import com.example.hudmapapp.location.LocationPermissionHandler
 import com.example.hudmapapp.location.LocationState
@@ -73,11 +72,16 @@ import com.example.hudmapapp.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
     navController: NavController,
+    locationProvider: LocationProvider,
     viewModel: HomeViewModel = viewModel(
         factory = HomeViewModel.Factory(
             LocalContext.current.applicationContext,
@@ -125,10 +129,6 @@ fun HomeScreen(
     var searchState by remember { mutableStateOf<DestinationSearchState>(DestinationSearchState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
-
-    val locationProvider: LocationProvider = remember {
-        FusedLocationProvider(context.applicationContext)
-    }
 
     val destinationRepository: DestinationRepository = remember {
         DestinationRepository.create(context.applicationContext, BuildConfig.MAPS_API_KEY)
@@ -647,11 +647,25 @@ private fun MapControlButton(
     }
 }
 
+private object PreviewLocationProvider : LocationProvider {
+    override val locationUpdates: SharedFlow<AppLocation> = MutableSharedFlow()
+    override val locationState: StateFlow<LocationState> =
+        MutableStateFlow(LocationState.WaitingForFix)
+    override val isTracking: StateFlow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun getLastLocation(): AppLocation? = null
+
+    override fun startUpdates() = Unit
+
+    override fun stopUpdates() = Unit
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun HomeScreenPreview() {
     HomeScreen(
         navController = rememberNavController(),
+        locationProvider = PreviewLocationProvider,
         map = { _, _, _, _, _, _ -> }
     )
 }

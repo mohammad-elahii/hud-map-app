@@ -138,24 +138,25 @@ Hudmapapp/
 └── settings.gradle.kts
 ```
 
-The active source tree currently contains `data`, `location`, and `ui` packages. A populated `domain` package and sensor implementation are not present yet. The older route-specific additions were intentionally removed so the project can return to a controlled map-only baseline before navigation is reintroduced.
+The active source tree contains `data`, `domain`, `location`, `navigation`, and `ui` packages. The `domain.driving` package now defines the immutable Phase 6 context contract; a sensor implementation is intentionally deferred to the next Phase 6 issue.
 
 ## 5. Current architecture
 
 ### Runtime dependency flow
 
 ```text
-MainActivity
-    ↓
-HudMapAppTheme
-    ↓
-AppNavigation / NavHost
-    ↓
-HomeScreen
-    ├── HomeMapView → Maps Compose → Maps SDK for Android
-    ├── DestinationRepository → Places SDK for Android
-    ├── FusedLocationProvider → Play Services Location
-    └── HomeViewModel → destination-selection state
+HudMapApplication
+    ├── NavigationManager → Navigation SDK
+    └── SharedLocationProvider
+          └── FusedLocationUpdateSource → Play Services Location
+
+MainActivity → HudMapAppTheme → AppNavigation / NavHost
+                                  ↓
+                              HomeScreen
+                                ├── HomeMapView → Maps SDK for Android
+                                ├── DestinationRepository → Places SDK for Android
+                                ├── shared LocationProvider state
+                                └── HomeViewModel → destination/route state
 ```
 
 ### Implemented patterns
@@ -163,8 +164,8 @@ HomeScreen
 - **Single-module organization:** package boundaries are conventions within `:app`.
 - **Lightweight MVVM:** `HomeViewModel` owns destination-selection state.
 - **Repository pattern:** `DestinationRepository` wraps Places access.
-- **Provider abstraction:** `LocationProvider` isolates most UI code from the fused-location client.
-- **Explicit state models:** destination selection, search, and location status use typed state representations.
+- **Provider abstraction:** one application-owned `LocationProvider` isolates UI from the fused-location client; passive collectors share one replayed stream while explicit lifecycle start/stop owns the single platform registration.
+- **Explicit state models:** destination, route, navigation, location, and Phase 6 driving-context values use typed immutable representations.
 - **Composable substitution:** `HomeScreen` accepts a map composable parameter for previews and future UI tests.
 - **Reusable presentation:** theme components and the shared HUD navigation layer reduce UI duplication.
 
@@ -267,14 +268,16 @@ Home does **not** currently provide:
 
 ### Location setup
 
-`HomeScreen` remembers a `FusedLocationProvider`, collects location updates, and manages provider start/stop around lifecycle and permission events. Location UI is provided by:
+`HudMapApplication` owns one `SharedLocationProvider`, and `AppNavigation` passes it to `HomeScreen`. Home passively collects the replayed location/state flows and explicitly starts or stops the single platform registration around lifecycle and permission events. Location UI is provided by:
 
 - `LocationPermissionHandler.kt`
 - `LocationPermissionOverlay.kt`
 - `LocationPermissionState.kt`
-- `FusedLocationProvider.kt`
+- `LocationUpdateSource.kt`
+- `SharedLocationProvider.kt`
+- `FusedLocationProvider.kt` (`FusedLocationUpdateSource`)
 
-The current provider exposes both a `callbackFlow` and explicit start/stop methods. The implementation should be unified before navigation begins so one callback path owns location emissions, lifecycle, and cleanup.
+Collectors never create fused callbacks. Repeated starts/stops are idempotent, old-generation callbacks are ignored, and a later consumer receives the latest timestamped fix without creating another platform subscription. Bearing and speed are nullable: absence is distinct from a valid north or stationary reading.
 
 ### Destination search flow
 
@@ -608,9 +611,11 @@ The HUD should render app-owned state, not Google’s navigation UI. The Navigat
 
 ```text
 GPS/location ─┐
-              ├─ NavigationContext → HUD
+              ├─ DrivingContextState → HUD
 Sensors ──────┘
 ```
+
+Issue #64 establishes the shared location source and immutable `DrivingContextState` vocabulary: normalized heading/speed values, heading source, orientation values, movement state, reliability, freshness, and timestamps. Defaults are explicitly unavailable/unknown; they never fabricate north, stationary movement, or fresh data. Sensor production, smoothing, source precedence/fusion, movement hysteresis, and HUD consumption remain separate Phase 6 work.
 
 Phase 6 is deliberately flexible. Real Navigation SDK data should determine which sensor features improve the HUD instead of building sensors speculatively.
 
@@ -764,7 +769,9 @@ Google Play
 
 - **HomeViewModel:** destination-selection state.
 - **HomeScreen:** search query/results, debounce job, permission overlay reason, network snapshot, recenter event, banner dismissal, and effects.
-- **FusedLocationProvider:** platform callbacks and location status.
+- **HudMapApplication / SharedLocationProvider:** one shared location identity, one lifecycle-controlled registration, replayed fixes, and typed location status.
+- **FusedLocationUpdateSource:** Play Services callback/request boundary only.
+- **domain.driving:** immutable Phase 6 context contracts; sensor/fusion producers are not implemented by issue #64.
 - **HUD screens:** static presentation state.
 
 ### Phase 3 target
