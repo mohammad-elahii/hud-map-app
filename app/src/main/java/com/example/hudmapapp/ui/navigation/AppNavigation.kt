@@ -73,6 +73,7 @@ fun AppNavigation() {
         composable<AppRoute.Home> {
             HomeScreen(
                 navController = navController,
+                locationProvider = application.locationProvider,
                 sessionCoordinator = sessionCoordinator,
                 onStartNavigation = { navController.navigate(AppRoute.HUD) }
             )
