@@ -15,10 +15,19 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.example.hudmapapp.navigation.NavigationSessionState
+import com.example.hudmapapp.navigation.NavigationState
+import com.example.hudmapapp.navigation.fakeNavigationState
+import com.example.hudmapapp.ui.navigation.AppRoute
 
 @Composable
 fun MirroredHUDScreen(
-    navController: NavController
+    navController: NavController,
+    sessionState: NavigationSessionState = NavigationSessionState.Idle,
+    navigationState: NavigationState = NavigationState(),
+    onStop: () -> Unit = {},
+    onResume: () -> Unit = {},
+    onRetry: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -26,11 +35,28 @@ fun MirroredHUDScreen(
             .background(Color.Black)
     ) {
 
-        HUDNavigationLayer(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(scaleX = -1f)
-        )
+        // Mirrors HUDScreen: same session state, same Idle/Stopped fallback,
+        // layer flipped for windshield projection. 5.3 wires navigationState
+        // through; 5.4 verifies mirrored arrow/text parity.
+        if (sessionState is NavigationSessionState.Idle ||
+            sessionState is NavigationSessionState.Stopped
+        ) {
+            HudIdleFallback(
+                onBackToMap = {
+                    navController.popBackStack(
+                        AppRoute.Home,
+                        inclusive = false
+                    )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            HUDNavigationLayer(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(scaleX = -1f)
+            )
+        }
 
         HUDIconButton(
             icon = Icons.Filled.Close,
@@ -51,5 +77,17 @@ fun MirroredHUDScreen(
 private fun MirroredHUDScreenPreview() {
     MirroredHUDScreen(
         navController = rememberNavController()
+    )
+}
+
+@Preview(
+    showBackground = true,
+    backgroundColor = 0xFF000000
+)
+@Composable
+private fun MirroredHUDScreenActivePreview() {
+    MirroredHUDScreen(
+        navController = rememberNavController(),
+        navigationState = fakeNavigationState()
     )
 }
