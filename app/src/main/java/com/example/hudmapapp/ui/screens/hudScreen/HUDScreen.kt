@@ -93,6 +93,26 @@ fun HUDScreen(
             .background(Color.Black)
     ) {
 
+        // The turn-by-turn Navigation SDK map is only mounted while a session
+        // is live; Idle/Error/etc. fall back to the plain black HUD.
+        val showNavMap = when (sessionState) {
+            is NavigationSessionState.Active,
+            is NavigationSessionState.Starting,
+            is NavigationSessionState.Rerouting,
+            is NavigationSessionState.OffRoute,
+            is NavigationSessionState.Interrupted -> true
+            else -> false
+        }
+        if (showNavMap) {
+            HudNavMapView(modifier = Modifier.fillMaxSize())
+            // Scrim keeps the guidance text readable over the live map.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+            )
+        }
+
         HudSessionContent(
             sessionState = sessionState,
             navigationState = navigationState,

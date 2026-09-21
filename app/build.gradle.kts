@@ -72,7 +72,6 @@ dependencies {
 
     implementation(libs.play.services.location)
     implementation(libs.places)
-    implementation(libs.maps.compose)
     implementation(libs.navigation)
 
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)

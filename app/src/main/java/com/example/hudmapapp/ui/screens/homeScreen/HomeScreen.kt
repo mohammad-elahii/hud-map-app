@@ -307,7 +307,15 @@ fun HomeScreen(
         }
     ) { permGranted, permissionActions ->
 
-        LaunchedEffect(permGranted) { hasPermission = permGranted }
+        LaunchedEffect(permGranted) {
+            hasPermission = permGranted
+            // getNavigator() fails with LOCATION_PERMISSION_MISSING (and
+            // NavigationManager resets to Uninitialized) when called before
+            // the grant, so retry navigator init as soon as we have it.
+            if (permGranted) {
+                navigationManager.initialize(context.applicationContext as HudMapApplication)
+            }
+        }
 
         Scaffold { innerPadding ->
 
@@ -323,14 +331,33 @@ fun HomeScreen(
                     else -> emptyList()
                 }
 
-                map(
-                    currentLocation,
-                    recenterTrigger,
-                    selectedDestination,
-                    previewRoutes,
-                    selectedRoute?.id,
-                    { routeId -> viewModel.selectRoute(routeId) }
-                )
+                // The Navigation SDK bundles its own Maps SDK build whose
+                // MapView only initializes after the navigator is ready.
+                // Composing GoogleMap before that yields a blank map with
+                // no tiles and no my-location layer, so gate it here.
+                if (navigationInitState is NavigationInitState.Ready) {
+                    map(
+                        currentLocation,
+                        recenterTrigger,
+                        selectedDestination,
+                        previewRoutes,
+                        selectedRoute?.id,
+                        { routeId -> viewModel.selectRoute(routeId) }
+                    )
+                } else {
+                    MapPlaceholder(
+                        message = when (navigationInitState) {
+                            is NavigationInitState.Error ->
+                                "Navigation SDK failed to initialize (code " +
+                                    (navigationInitState as NavigationInitState.Error).errorCode +
+                                    "). Map unavailable."
+                            is NavigationInitState.TermsNotAccepted ->
+                                "Accept the navigation terms to view the map."
+                            else -> "Preparing map…"
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 HomeTopBar(
                     modifier = Modifier

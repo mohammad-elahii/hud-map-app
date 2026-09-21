@@ -1,6 +1,7 @@
 package com.example.hudmapapp.navigation
 
 import android.app.Application
+import android.util.Log
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,22 +23,35 @@ class NavigationManager {
 
     private var navigator: Navigator? = null
 
+    private fun setState(state: NavigationInitState) {
+        Log.d("HudMapNav", "NavigationInitState -> $state")
+        _initState.value = state
+    }
+
     fun initialize(application: Application) {
         if (_initState.value !is NavigationInitState.Uninitialized) return
         if (!NavigationApi.areTermsAccepted(application)) {
-            _initState.value = NavigationInitState.TermsNotAccepted
+            setState(NavigationInitState.TermsNotAccepted)
             return
         }
-        _initState.value = NavigationInitState.Initializing
+        setState(NavigationInitState.Initializing)
 
         NavigationApi.getNavigator(application, object : NavigationApi.NavigatorListener {
             override fun onNavigatorReady(readyNavigator: Navigator) {
                 navigator = readyNavigator
-                _initState.value = NavigationInitState.Ready(readyNavigator)
+                setState(NavigationInitState.Ready(readyNavigator))
             }
 
             override fun onError(errorCode: Int) {
-                _initState.value = NavigationInitState.Error(errorCode)
+                if (errorCode == NavigationApi.ErrorCode.LOCATION_PERMISSION_MISSING) {
+                    // Permission is requested asynchronously by the UI; go back
+                    // to Uninitialized so initialize() is retried once the
+                    // grant lands instead of being stuck in Error forever.
+                    Log.w("HudMapNav", "getNavigator: location permission missing, will retry after grant")
+                    setState(NavigationInitState.Uninitialized)
+                } else {
+                    setState(NavigationInitState.Error(errorCode))
+                }
             }
         })
     }
@@ -48,7 +62,7 @@ class NavigationManager {
         ) {
             return
         }
-        _initState.value = NavigationInitState.Uninitialized
+        setState(NavigationInitState.Uninitialized)
         initialize(application)
     }
 
