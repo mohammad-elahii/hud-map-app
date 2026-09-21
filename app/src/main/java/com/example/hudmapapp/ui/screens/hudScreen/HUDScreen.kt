@@ -47,16 +47,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.example.hudmapapp.navigation.NavigationSessionState
+import com.example.hudmapapp.navigation.NavigationState
+import com.example.hudmapapp.navigation.fakeNavigationState
 import com.example.hudmapapp.ui.navigation.AppRoute
 import com.example.hudmapapp.ui.theme.MainGradient
+import com.example.hudmapapp.ui.theme.components.HudButton
 
 private const val TAG = "HUDScreen"
 
 /**
  * Distraction-free HUD navigation display.
  *
- * Everything here is currently mocked/static:
- * no GPS, sensors, or route calculation.
+ * Fed app-owned [NavigationState] from the shared session coordinator (see
+ * AppNavigation): this screen never touches Navigation SDK types. Live
+ * guidance rendering lands in 5.3; session-state variants in 5.4.
  *
  * The actual navigation visuals live in [HUDNavigationLayer] so that
  * [MirroredHUDScreen] (issue #18) can reuse the exact same content,
@@ -64,7 +69,12 @@ private const val TAG = "HUDScreen"
  */
 @Composable
 fun HUDScreen(
-    navController: NavController
+    navController: NavController,
+    sessionState: NavigationSessionState = NavigationSessionState.Idle,
+    navigationState: NavigationState = NavigationState(),
+    onStop: () -> Unit = {},
+    onResume: () -> Unit = {},
+    onRetry: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -72,7 +82,23 @@ fun HUDScreen(
             .background(Color.Black)
     ) {
 
-        HUDNavigationLayer(modifier = Modifier.fillMaxSize())
+        // 5.3 consumes navigationState/onStop/onResume/onRetry here to render
+        // live guidance + session variants. 5.2 only wires the state through.
+        if (sessionState is NavigationSessionState.Idle ||
+            sessionState is NavigationSessionState.Stopped
+        ) {
+            HudIdleFallback(
+                onBackToMap = {
+                    navController.popBackStack(
+                        AppRoute.Home,
+                        inclusive = false
+                    )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            HUDNavigationLayer(modifier = Modifier.fillMaxSize())
+        }
 
         HUDIconButton(
             icon = Icons.Filled.Close,
@@ -364,4 +390,49 @@ private fun HUDScreenPreview() {
     HUDScreen(
         navController = rememberNavController()
     )
+}
+
+@Preview(
+    showBackground = true,
+    backgroundColor = 0xFF000000
+)
+@Composable
+private fun HUDScreenActivePreview() {
+    HUDScreen(
+        navController = rememberNavController(),
+        navigationState = fakeNavigationState()
+    )
+}
+
+/**
+ * Defined no-session fallback: shown when the HUD is opened with no active
+ * navigation (Idle / Stopped) instead of a blank screen or stale guidance.
+ */
+@Composable
+internal fun HudIdleFallback(
+    onBackToMap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "No active navigation",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "Start navigation from the map to see guidance here.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        HudButton(
+            text = "Back to map",
+            onClick = onBackToMap,
+            modifier = Modifier.padding(top = 24.dp)
+        )
+    }
 }
