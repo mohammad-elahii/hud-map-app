@@ -144,7 +144,7 @@ internal fun HomeMapView(
                 rotationGesturesEnabled = true,
                 scrollGesturesEnabled = true,
                 tiltGesturesEnabled = true,
-                zoomControlsEnabled = false,
+                zoomControlsEnabled = true,
                 zoomGesturesEnabled = true
             ),
             onMapLoaded = {

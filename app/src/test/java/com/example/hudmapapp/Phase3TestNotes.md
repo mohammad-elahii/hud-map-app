@@ -77,6 +77,23 @@ the active session only:
 6. `stopSimulator()` is not exposed in UI — ending the session via Stop also
    ends simulation when destinations clear.
 
+## HUD simulator verification (Phase 5, no driving needed)
+
+Same simulator session as above, but navigate Home → HUD after step 3:
+
+1. HUD shows live instruction, distance-to-maneuver, `Then …` next preview,
+   and remaining / ETA footer ticking every ~2 s — identical values to the
+   banner (same `navigationState`).
+2. From an `adb shell` hook, drive the coordinator into `Rerouting` /
+   `OffRoute`: HUD shows "Finding a better route." / "Off route. Finding a
+   new route." with frozen last-known guidance (no torn mix).
+3. Background 30+ s: HUD shows the paused message with Resume; tap Resume.
+4. End the session via Stop: HUD falls back to "No active navigation".
+5. Open MirroredHUD: same guidance state renders mirrored (geometric flip —
+   correct in windshield reflection by design, see `MirroredHUDScreen` KDoc).
+6. Rotate and jump Home ↔ HUD ↔ MirroredHUD: one session, no duplicates,
+   no leaked listeners in logcat.
+
 ## Manual / live-device checklist (not in CI)
 
 ### Route preview (Phase 3)
@@ -97,6 +114,16 @@ the active session only:
 - [ ] Rotation during Active: session survives, no duplicate.
 - [ ] Background 30 s then return: pauses per #55 policy, resumes on return.
 - [ ] Permission revoked mid-session: typed error, no crash.
+
+### Custom HUD (Phase 5)
+
+- [ ] Start: HUD shows real maneuver + distance + ETA, matches banner.
+- [ ] Follow: values update while moving; maneuver flips animate at turns.
+- [ ] Off-route: HUD recalculating, recovers to Active with fresh maneuver.
+- [ ] Airplane mode mid-session: interruption + Resume works on reconnect.
+- [ ] Arrival: frozen arrived state, no further updates.
+- [ ] Normal vs mirrored: identical guidance, readable at arm-plus length in low light.
+- [ ] Rotation + Home <-> HUD <-> MirroredHUD jumps: no duplicate session, no leak in logcat.
 
 ## Standard commands
 
