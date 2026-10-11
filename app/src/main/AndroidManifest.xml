@@ -39,6 +39,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Receives turn-by-turn NavInfo updates from the Navigation SDK
+            (bound via Navigator.registerServiceForNavUpdates).
+        -->
+        <service
+            android:name=".navigation.TurnByTurnService"
+            android:exported="false" />
     </application>
 
 </manifest>

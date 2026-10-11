@@ -15,6 +15,5 @@ sealed interface AppRoute {
     @Serializable data object Introduction3 : AppRoute
       @Serializable data object Home : AppRoute
     @Serializable data object HUD : AppRoute
-    @Serializable data object MirroredHUD : AppRoute
     @Serializable data object Settings : AppRoute
 }

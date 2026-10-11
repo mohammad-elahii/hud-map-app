@@ -1,6 +1,8 @@
 package com.example.hudmapapp.ui.screens.homeScreen
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +43,7 @@ import com.example.hudmapapp.data.model.SelectedDestinationState
 import com.example.hudmapapp.location.AppLocation
 import com.example.hudmapapp.location.hasLocationPermission
 import com.example.hudmapapp.ui.theme.components.HudButton
+import com.example.hudmapapp.ui.theme.MainGradient
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.GoogleMapOptions
@@ -50,10 +53,12 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.JointType
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.Polyline
 import com.google.android.gms.maps.model.PolylineOptions
+import com.example.hudmapapp.R
 
 private const val TAG = "HudMapMapView"
 
@@ -64,9 +69,60 @@ private const val DestinationZoom = 16f
 private const val RouteBoundsPaddingPx = 120
 private const val SelectedRouteWidth = 14f
 private const val AlternativeRouteWidth = 9f
-private const val SelectedRouteZIndex = 2f
-private const val AlternativeRouteZIndex = 1f
-private val SelectedRouteColor = 0xFF7C4DFF.toInt()
+private const val SelectedRouteZIndex = 100f
+private const val AlternativeRouteBaseZIndex = 10f
+private const val AlternativeRouteZIndexStep = 10f
+
+// The selected route is drawn as consecutive chunks colored along
+// MainGradient (Polyline only supports flat colors).
+private const val RouteGradientChunks = 24
+
+private fun gradientArgbAt(t: Float): Int {
+    val colors = MainGradient
+    val clamped = t.coerceIn(0f, 1f)
+    val scaled = clamped * (colors.size - 1)
+    val index = scaled.toInt().coerceAtMost(colors.size - 2)
+    val fraction = scaled - index
+    val from = colors[index]
+    val to = colors[index + 1]
+    val red = from.red + (to.red - from.red) * fraction
+    val green = from.green + (to.green - from.green) * fraction
+    val blue = from.blue + (to.blue - from.blue) * fraction
+    return android.graphics.Color.argb(
+        255,
+        (red * 255).toInt(),
+        (green * 255).toInt(),
+        (blue * 255).toInt()
+    )
+}
+
+// One physical tap fires the polyline click listener once per OVERLAPPING
+// polyline (alternative routes share road segments), so callbacks are
+// collected for this long before a single selection decision is made.
+private const val PolylineClickWindowMs = 60L
+
+/**
+ * Collects the click callbacks of a single tap gesture and hands the whole
+ * set to [decide] once the gesture window has closed.
+ */
+private class PolylineClickGate {
+    private val handler = Handler(Looper.getMainLooper())
+    private var clicked = mutableListOf<Polyline>()
+    private var decision: Runnable? = null
+
+    fun onPolylineClicked(polyline: Polyline, decide: (List<Polyline>) -> Unit) {
+        decision?.let(handler::removeCallbacks)
+        if (clicked.none { it === polyline }) clicked.add(polyline)
+        val run = Runnable {
+            val candidates = clicked
+            clicked = mutableListOf()
+            decision = null
+            decide(candidates)
+        }
+        decision = run
+        handler.postDelayed(run, PolylineClickWindowMs)
+    }
+}
 private val AlternativeRouteColor = 0xFF9E9E9E.toInt()
 private const val CameraAnimationDurationMs = 600
 
@@ -82,9 +138,8 @@ sealed class MapError {
 /**
  * The Navigation SDK ships its own copy of the Maps SDK classes and replaces
  * the standalone Maps SDK entirely, so the home screen renders through the
- * bundled MapView, which behaves exactly like a normal Google map. The
- * turn-by-turn map (NavigationView with full navigation UI) lives in the HUD
- * screen instead; see HudNavMapView.
+ * bundled MapView, which behaves exactly like a normal Google map. The HUD
+ * screen is a headless guidance display and hosts no map at all.
  */
 @Composable
 internal fun HomeMapView(
@@ -94,6 +149,9 @@ internal fun HomeMapView(
     routePreviews: List<RoutePreview> = emptyList(),
     selectedRouteId: String? = null,
     onRouteSelected: (String) -> Unit = {},
+    onPoiClick: (placeId: String, name: String, latitude: Double, longitude: Double) -> Unit = { _, _, _, _ -> },
+    satelliteEnabled: Boolean = false,
+    darkStyleEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -105,6 +163,9 @@ internal fun HomeMapView(
     var destinationMarker by remember { mutableStateOf<Marker?>(null) }
     var hasCenteredOnUser by remember { mutableStateOf(false) }
     var mapError by remember { mutableStateOf<MapError>(MapError.None) }
+
+    val polylineClickGate = remember { PolylineClickGate() }
+    val effectiveSelectedRouteId = remember { mutableStateOf<String?>(null) }
 
     val hasUserLocation = currentLocation != null
 
@@ -129,6 +190,12 @@ internal fun HomeMapView(
     val orderedRoutes = buildList {
         routePreviews.filter { it.id != selectedRoute?.id }.forEach { add(it) }
         selectedRoute?.let { add(it) }
+    }
+
+    // Mirrors the effective selection (including the first-route fallback)
+    // so the click gate can exclude the already-selected route.
+    LaunchedEffect(selectedRoute?.id) {
+        effectiveSelectedRouteId.value = selectedRoute?.id
     }
 
     AndroidView(
@@ -163,7 +230,27 @@ internal fun HomeMapView(
                             isZoomGesturesEnabled = true
                         }
                         readyMap.setOnPolylineClickListener { polyline ->
-                            (polyline.tag as? String)?.let(onRouteSelected)
+                            polylineClickGate.onPolylineClicked(polyline) { candidates ->
+                                val chosen = candidates
+                                    .filter { (it.tag as? String) != effectiveSelectedRouteId.value }
+                                    .maxByOrNull { it.zIndex }
+                                    ?: candidates.maxByOrNull { it.zIndex }
+                                    ?: return@onPolylineClicked
+                                val chosenId = chosen.tag as? String
+                                if (chosenId != null && chosenId != effectiveSelectedRouteId.value) {
+                                    Log.d(TAG, "Polyline tap selected route $chosenId (${candidates.size} overlapped)")
+                                    onRouteSelected(chosenId)
+                                }
+                            }
+                        }
+                        readyMap.setOnPoiClickListener { poi ->
+                            Log.d(TAG, "POI clicked: ${poi.name} (${poi.placeId})")
+                            onPoiClick(
+                                poi.placeId,
+                                poi.name,
+                                poi.latLng.latitude,
+                                poi.latLng.longitude
+                            )
                         }
                         readyMap.setOnMapLoadedCallback {
                             Log.d(TAG, "Map tiles loaded")
@@ -204,6 +291,29 @@ internal fun HomeMapView(
         val enabled = hasUserLocation && hasLocationPermission(context)
         Log.d(TAG, "setMyLocationEnabled=$enabled")
         map.isMyLocationEnabled = enabled
+    }
+
+    val darkStyleJson = remember {
+        context.resources.openRawResource(R.raw.map_style_dark).readBytes().decodeToString()
+    }
+
+    // Satellite and the dark vector style are mutually exclusive: custom
+    // styling only applies to the vector base map, never to satellite tiles.
+    LaunchedEffect(satelliteEnabled, darkStyleEnabled, googleMap) {
+        val map = googleMap ?: return@LaunchedEffect
+        Log.d(TAG, "mapType satellite=$satelliteEnabled darkStyle=$darkStyleEnabled")
+        map.mapType = if (satelliteEnabled) {
+            GoogleMap.MAP_TYPE_SATELLITE
+        } else {
+            GoogleMap.MAP_TYPE_NORMAL
+        }
+        map.setMapStyle(
+            if (darkStyleEnabled && !satelliteEnabled) {
+                MapStyleOptions(darkStyleJson)
+            } else {
+                null
+            }
+        )
     }
 
     LaunchedEffect(recenterTrigger) {
@@ -250,21 +360,52 @@ internal fun HomeMapView(
     LaunchedEffect(googleMap, routePreviews, selectedRoute?.id) {
         val map = googleMap ?: return@LaunchedEffect
         routePolylines.forEach { it.remove() }
-        routePolylines = orderedRoutes.mapNotNull { route ->
+        val built = mutableListOf<Polyline>()
+        var alternativeIndex = 0
+        orderedRoutes.forEach { route ->
             val points = route.polylinePoints.map { LatLng(it.latitude, it.longitude) }
-            if (points.size < 2) return@mapNotNull null
+            if (points.size < 2) return@forEach
             val isSelected = route.id == selectedRoute?.id
-            Log.d(TAG, "Adding polyline for route ${route.id} (selected=$isSelected, ${points.size} points)")
-            map.addPolyline(
-                PolylineOptions()
-                    .addAll(points)
-                    .clickable(true)
-                    .color(if (isSelected) SelectedRouteColor else AlternativeRouteColor)
-                    .jointType(JointType.ROUND)
-                    .width(if (isSelected) SelectedRouteWidth else AlternativeRouteWidth)
-                    .zIndex(if (isSelected) SelectedRouteZIndex else AlternativeRouteZIndex)
-            ).apply { tag = route.id }
+            if (isSelected) {
+                // Gradient route: consecutive overlapping chunks, each
+                // colored by its position along MainGradient. Adjacent
+                // chunks share their boundary point so the stroke stays
+                // visually continuous.
+                val chunkSize = maxOf(1, (points.size + RouteGradientChunks - 1) / RouteGradientChunks)
+                var start = 0
+                while (start < points.size - 1) {
+                    val end = minOf(start + chunkSize + 1, points.size)
+                    val t = start.toFloat() / (points.size - 1).coerceAtLeast(1)
+                    built += map.addPolyline(
+                        PolylineOptions()
+                            .addAll(points.subList(start, end))
+                            .clickable(true)
+                            .color(gradientArgbAt(t))
+                            .jointType(JointType.ROUND)
+                            .width(SelectedRouteWidth)
+                            .zIndex(SelectedRouteZIndex)
+                    ).apply { tag = route.id }
+                    start += chunkSize
+                }
+            } else {
+                // Distinct z per alternative so "topmost drawn" is well
+                // defined when the click gate has to pick between overlapped
+                // routes.
+                val zIndex =
+                    AlternativeRouteBaseZIndex + alternativeIndex++ * AlternativeRouteZIndexStep
+                Log.d(TAG, "Adding polyline for route ${route.id} (selected=false, zIndex=$zIndex, ${points.size} points)")
+                built += map.addPolyline(
+                    PolylineOptions()
+                        .addAll(points)
+                        .clickable(true)
+                        .color(AlternativeRouteColor)
+                        .jointType(JointType.ROUND)
+                        .width(AlternativeRouteWidth)
+                        .zIndex(zIndex)
+                ).apply { tag = route.id }
+            }
         }
+        routePolylines = built
     }
 
     LaunchedEffect(googleMap, destinationLatLng, selectedDestination) {

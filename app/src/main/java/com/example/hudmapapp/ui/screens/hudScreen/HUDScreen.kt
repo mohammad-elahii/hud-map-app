@@ -1,5 +1,7 @@
 package com.example.hudmapapp.ui.screens.hudScreen
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.util.Log
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -9,12 +11,15 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -27,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,7 +52,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,31 +98,47 @@ fun HUDScreen(
     onResume: () -> Unit = {},
     onRetry: () -> Unit = {}
 ) {
+    // The HUD is a windshield display: landscape only while this screen is
+    // on top, restored to the system default when leaving.
+    val activity = LocalContext.current as? Activity
+    DisposableEffect(Unit) {
+        activity?.requestedOrientation =
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose {
+            activity?.requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    // Maximum display brightness for the whole HUD visit, restored on exit.
+    DisposableEffect(Unit) {
+        val window = activity?.window
+        val attrs = window?.attributes
+        attrs?.screenBrightness =
+            android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+        if (window != null && attrs != null) {
+            window.attributes = attrs
+        }
+        onDispose {
+            val restore = window?.attributes
+            restore?.screenBrightness =
+                android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            if (window != null && restore != null) {
+                window.attributes = restore
+            }
+        }
+    }
+
+    // Windshield mirroring happens in place: the guidance layer flips
+    // geometrically (double-flip through the glass reads correctly); close
+    // and mirror controls stay outside the flipped layer.
+    var mirrored by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-
-        // The turn-by-turn Navigation SDK map is only mounted while a session
-        // is live; Idle/Error/etc. fall back to the plain black HUD.
-        val showNavMap = when (sessionState) {
-            is NavigationSessionState.Active,
-            is NavigationSessionState.Starting,
-            is NavigationSessionState.Rerouting,
-            is NavigationSessionState.OffRoute,
-            is NavigationSessionState.Interrupted -> true
-            else -> false
-        }
-        if (showNavMap) {
-            HudNavMapView(modifier = Modifier.fillMaxSize())
-            // Scrim keeps the guidance text readable over the live map.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-            )
-        }
 
         HudSessionContent(
             sessionState = sessionState,
@@ -125,7 +152,8 @@ fun HUDScreen(
             onStop = onStop,
             onResume = onResume,
             onRetry = onRetry,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            mirrorGuidance = mirrored
         )
 
         HUDIconButton(
@@ -141,22 +169,15 @@ fun HUDScreen(
                 .padding(20.dp)
         )
 
-        // Entry point into the mirrored presentation (issue #18). Kept as a
-        // plain, unmirrored text pill so it never has to be second-guessed
-        // as part of the navigation instruction itself.
+        // Mirrored presentation toggle (in place, no separate screen). A
+        // plain, unmirrored text pill so it never gets second-guessed as
+        // part of the navigation instruction itself.
         MirrorEntryButton(
-            onClick = {
-                Log.d(TAG, "Mirror button clicked — attempting navigate(AppRoute.MirroredHUD)")
-                try {
-                    navController.navigate(AppRoute.MirroredHUD)
-                    Log.d(TAG, "navigate(AppRoute.MirroredHUD) call completed without throwing")
-                } catch (e: Exception) {
-                    Log.e(TAG, "navigate(AppRoute.MirroredHUD) failed", e)
-                }
-            },
+            label = if (mirrored) "Unmirror" else "Mirror",
+            onClick = { mirrored = !mirrored },
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(20.dp)
+                .padding(top = 76.dp, end = 20.dp)
         )
     }
 }
@@ -182,56 +203,115 @@ internal fun HUDNavigationLayer(
     )
     val instruction = headlineFor(state)
     val nextLine = nextLineFor(state)
-    val footer = footerFor(state)
-    val distances = state.progress
     val contentAlpha = if (dimmed) 0.6f else 1f
+    val distances = state.progress
+    val colors = MaterialTheme.colorScheme
 
     Box(modifier = modifier) {
-        Column(
+        Row(
             modifier = Modifier
-                .align(Alignment.Center)
-                .graphicsLayer(alpha = contentAlpha),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .fillMaxSize()
+                .graphicsLayer(alpha = contentAlpha)
+                .padding(horizontal = 36.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (statusLine != null) {
+            // Left: remaining distance to the next maneuver.
+            Column(
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Small preview of the maneuver AFTER the current turn.
+                state.nextManeuver?.let { next ->
+                    val nextRotation = rotationForManeuver(next.type)
+                    ManeuverGlyph(
+                        type = next.type,
+                        roundaboutExit = next.roundaboutExit,
+                        rotationDegrees = nextRotation,
+                        contentDescription = "Next maneuver: ${next.instruction}",
+                        modifier = Modifier.size(34.dp)
+                    )
+                    Text(
+                        text = "next",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant
+                    )
+                }
+
                 Text(
-                    text = statusLine,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.secondary
+                    text = formatHudDistance(distances.distanceToManeuverMeters),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.tertiary
+                )
+                Text(
+                    text = "to turn",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant
                 )
             }
 
-            PulsingManeuverArrow(
-                rotationDegrees = animatedRotation,
-                contentDescription = "$instruction in ${formatHudDistance(distances.distanceToManeuverMeters)}"
-            )
+            // Center: CURRENT maneuver arrow and instruction text.
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 24.dp)
+            ) {
+                if (statusLine != null) {
+                    Text(
+                        text = statusLine,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.secondary
+                    )
+                }
 
-            Text(
-                text = formatHudDistance(distances.distanceToManeuverMeters),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.tertiary
-            )
-
-            Text(
-                text = instruction,
-                style = MaterialTheme.typography.displaySmall,
-                color = MaterialTheme.colorScheme.secondary
-            )
-
-            if (nextLine != null) {
-                Text(
-                    text = nextLine,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.tertiary
+                PulsingManeuverArrow(
+                    type = state.currentManeuver?.type ?: ManeuverType.UNKNOWN,
+                    roundaboutExit = state.currentManeuver?.roundaboutExit,
+                    rotationDegrees = animatedRotation,
+                    contentDescription = "$instruction in " +
+                        formatHudDistance(distances.distanceToManeuverMeters)
                 )
+
+                Text(
+                    text = instruction,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.secondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+
+                if (nextLine != null) {
+                    Text(
+                        text = nextLine,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.tertiary
+                    )
+                }
             }
 
-            if (footer != null) {
+            // Right: ETA and remaining time.
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Text(
-                    text = footer,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary
+                    text = distances.etaMillis
+                        ?.takeIf { it > 0 }
+                        ?.let { formatHudEta(it) }
+                        ?: HUD_MISSING_VALUE,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.secondary
+                )
+                Text(
+                    text = distances.remainingDurationSeconds
+                        ?.let { formatHudDuration(it) }
+                        ?.let { "$it left" }
+                        ?: HUD_MISSING_VALUE,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant
                 )
             }
         }
@@ -240,7 +320,7 @@ internal fun HUDNavigationLayer(
             SubtleCarGlyph(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 36.dp)
+                    .padding(bottom = 24.dp)
             )
         }
     }
@@ -248,6 +328,8 @@ internal fun HUDNavigationLayer(
 
 @Composable
 private fun PulsingManeuverArrow(
+    type: ManeuverType,
+    roundaboutExit: Int?,
     rotationDegrees: Float,
     contentDescription: String
 ) {
@@ -286,7 +368,7 @@ private fun PulsingManeuverArrow(
     ) {
         Box(
             modifier = Modifier
-                .size(180.dp)
+                .size(140.dp)
                 .scale(glowScale)
                 .background(
                     brush = Brush.radialGradient(
@@ -301,11 +383,12 @@ private fun PulsingManeuverArrow(
                 )
         )
 
-        GradientIcon(
+        ManeuverGlyph(
+            type = type,
+            roundaboutExit = roundaboutExit,
+            rotationDegrees = rotationDegrees,
             contentDescription = contentDescription,
-            modifier = Modifier
-                .size(120.dp)
-                .rotate(rotationDegrees)
+            modifier = Modifier.size(90.dp)
         )
     }
 }
@@ -340,6 +423,125 @@ private fun GradientIcon(
                 }
             }
     )
+}
+
+@Composable
+private fun ManeuverGlyph(
+    type: ManeuverType,
+    roundaboutExit: Int?,
+    rotationDegrees: Float,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    val iconResId = rememberManeuverIconResId(type)
+    if (iconResId != null) {
+        // Custom icon from res/drawable — artwork already includes the
+        // direction, so no rotation is applied.
+        Image(
+            painter = painterResource(iconResId),
+            contentDescription = contentDescription,
+            modifier = modifier
+        )
+    } else {
+        // Drawn fallbacks until the icon set is added: roundabout glyph or
+        // the rotating gradient arrow.
+        if ((type == ManeuverType.ROUNDABOUT || type == ManeuverType.ROUNDABOUT_EXIT) &&
+            roundaboutExit != null
+        ) {
+            RoundaboutExitGlyph(
+                exitNumber = roundaboutExit,
+                description = contentDescription,
+                modifier = modifier
+            )
+        } else {
+            GradientIcon(
+                contentDescription = contentDescription,
+                modifier = modifier.rotate(rotationDegrees)
+            )
+        }
+    }
+}
+
+/**
+ * Roundabout glyph: ring with an entry stem at the bottom and the exit arm
+ * drawn at the driver's counterclockwise exit position (right-hand traffic):
+ * exit 1 → 30° (upper right), exit 2 → straight ahead (90°), and so on in
+ * 60° steps. Rotation is baked into the drawing.
+ */
+@Composable
+private fun RoundaboutExitGlyph(
+    exitNumber: Int,
+    description: String,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier.semantics { contentDescription = description }
+    ) {
+        val white = Color.White
+        val stroke = size.minDimension * 0.055f
+        val cx = size.width / 2
+        val cy = size.height / 2
+        val ringRadius = size.minDimension * 0.26f
+
+        // Ring
+        drawCircle(
+            color = white,
+            radius = ringRadius,
+            center = Offset(cx, cy),
+            style = Stroke(width = stroke)
+        )
+
+        // Entry stem from the bottom edge into the ring.
+        drawLine(
+            color = white,
+            start = Offset(cx, size.height - stroke / 2),
+            end = Offset(cx, cy + ringRadius + stroke),
+            strokeWidth = stroke
+        )
+        drawLine(
+            color = white,
+            start = Offset(cx + stroke * 1.4f, cy + ringRadius + stroke * 2.6f),
+            end = Offset(cx, cy + ringRadius + stroke),
+            strokeWidth = stroke * 0.8f
+        )
+        drawLine(
+            color = white,
+            start = Offset(cx - stroke * 1.4f, cy + ringRadius + stroke * 2.6f),
+            end = Offset(cx, cy + ringRadius + stroke),
+            strokeWidth = stroke * 0.8f
+        )
+
+        // Exit arm at the driver's counterclockwise exit position.
+        val exit = exitNumber.coerceIn(1, 5)
+        val angleDeg = 30.0 + (exit - 1) * 60.0
+        val angleRad = Math.toRadians(angleDeg)
+        val dirX = kotlin.math.cos(angleRad).toFloat()
+        val dirY = -kotlin.math.sin(angleRad).toFloat()
+        val armStart = Offset(
+            cx + dirX * (ringRadius + stroke / 2),
+            cy + dirY * (ringRadius + stroke / 2)
+        )
+        val tip = Offset(
+            cx + dirX * (size.minDimension / 2 - stroke),
+            cy + dirY * (size.minDimension / 2 - stroke)
+        )
+        val tipDx = dirX
+        val tipDy = dirY
+        drawLine(color = white, start = armStart, end = tip, strokeWidth = stroke)
+
+        // Arrowhead at the arm tip: two wings rotated ±25° around the arm
+        // direction, drawn backwards from `tip`.
+        val wingAngle = (25.0 * Math.PI / 180.0)
+        val cosW = kotlin.math.cos(wingAngle).toFloat()
+        val sinW = kotlin.math.sin(wingAngle).toFloat()
+        val wingLength = stroke * 2.4f
+        val leftWingX = tip.x - (tipDx * cosW - tipDy * sinW) * wingLength
+        val leftWingY = tip.y - (tipDx * sinW + tipDy * cosW) * wingLength
+        val rightWingX = tip.x - (tipDx * cosW + tipDy * sinW) * wingLength
+        val rightWingY = tip.y - (-tipDx * sinW + tipDy * cosW) * wingLength
+        drawLine(color = white, start = tip, end = Offset(leftWingX, leftWingY), strokeWidth = stroke * 0.8f)
+        drawLine(color = white, start = tip, end = Offset(rightWingX, rightWingY), strokeWidth = stroke * 0.8f)
+    }
 }
 
 @Composable
@@ -441,11 +643,12 @@ internal fun HUDIconButton(
 
 @Composable
 private fun MirrorEntryButton(
+    label: String = "Mirror",
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Text(
-        text = "Mirror",
+        text = label,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.tertiary,
         modifier = modifier

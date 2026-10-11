@@ -253,18 +253,16 @@ class RoutesApiDataSource(
                 routeObject["duration"]?.jsonPrimitive?.contentOrNull
             )
             val routeToken = routeObject["routeToken"]?.jsonPrimitive?.contentOrNull
-            val staticDuration = routeObject["staticDuration"]
-                ?.jsonPrimitive?.contentOrNull
             if (encodedPolyline.isBlank()) return@mapIndexedNotNull null
+            // routeLabels is only "DEFAULT_ROUTE"/"ALTERNATIVE_ROUTE", so it
+            // is not unique across alternatives; index-based ids are.
             RoutePreview(
-                id = routeObject["routeLabels"]?.jsonArray?.firstOrNull()
-                    ?.jsonPrimitive?.contentOrNull ?: "route-$index",
+                id = "route-$index",
                 polylinePoints = decodePolyline(encodedPolyline),
                 encodedPolyline = encodedPolyline,
                 distanceMeters = distanceMeters,
                 durationSeconds = durationSeconds,
-                routeToken = routeToken,
-                label = staticDuration
+                routeToken = routeToken
             )
         }
 

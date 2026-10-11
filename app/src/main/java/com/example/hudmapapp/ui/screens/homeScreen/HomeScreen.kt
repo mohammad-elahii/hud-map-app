@@ -2,7 +2,9 @@ package com.example.hudmapapp.ui.screens.homeScreen
 
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MyLocation
@@ -99,15 +102,21 @@ fun HomeScreen(
         SelectedDestinationState,
         List<RoutePreview>,
         String?,
-        (String) -> Unit
-    ) -> Unit = { loc, trigger, selected, routes, selectedRouteId, onRouteSelected ->
+        (String) -> Unit,
+        (String, String, Double, Double) -> Unit,
+        Boolean,
+        Boolean
+    ) -> Unit = { loc, trigger, selected, routes, selectedRouteId, onRouteSelected, onPoiClick, satellite, darkStyle ->
         HomeMapView(
             currentLocation = loc,
             recenterTrigger = trigger,
             selectedDestination = selected,
             routePreviews = routes,
             selectedRouteId = selectedRouteId,
-            onRouteSelected = onRouteSelected
+            onRouteSelected = onRouteSelected,
+            onPoiClick = onPoiClick,
+            satelliteEnabled = satellite,
+            darkStyleEnabled = darkStyle
         )
     },
     onStartNavigation: (RoutePreview) -> Unit = {}
@@ -129,6 +138,20 @@ fun HomeScreen(
     var searchState by remember { mutableStateOf<DestinationSearchState>(DestinationSearchState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    // Map POI (tapped place) sheet state
+    var poiSheetVisible by remember { mutableStateOf(false) }
+    // Dismissible without losing the selection: dismiss only hides the
+    // sheet; clearing is an explicit action on the reopen pill.
+    var previewSheetVisible by remember { mutableStateOf(false) }
+    var poiLoading by remember { mutableStateOf(false) }
+    var poiDetails by remember { mutableStateOf<Destination?>(null) }
+    var poiPhotos by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
+
+    // Map display toggles: satellite and the dark vector style are mutually
+    // exclusive (styling never applies to satellite tiles).
+    var satelliteEnabled by remember { mutableStateOf(false) }
+    var darkStyleEnabled by remember { mutableStateOf(false) }
 
     val destinationRepository: DestinationRepository = remember {
         DestinationRepository.create(context.applicationContext, BuildConfig.MAPS_API_KEY)
@@ -296,6 +319,45 @@ fun HomeScreen(
         }
     }
 
+    fun onPoiClicked(placeId: String, name: String, latitude: Double, longitude: Double) {
+        // While a destination is chosen or route previews are being compared,
+        // tapping the map (even on a POI) must not wipe the selection — the
+        // user is inspecting the routes. POI handling resumes once cleared.
+        val selectionActive = selectedDestination is SelectedDestinationState.Selected ||
+            selectedDestination is SelectedDestinationState.Confirmed
+        val routePreviewActive = routePreviewState is RoutePreviewState.Available ||
+            routePreviewState is RoutePreviewState.Loading
+        if (selectionActive || routePreviewActive) return
+
+        viewModel.clearRoutePreview()
+        viewModel.clearDestination()
+        searchQuery = ""
+        searchState = DestinationSearchState.Idle
+
+        poiSheetVisible = true
+        poiLoading = true
+        poiDetails = Destination(
+            placeId = placeId,
+            name = name,
+            address = "",
+            latitude = latitude,
+            longitude = longitude
+        )
+        poiPhotos = emptyList()
+
+        coroutineScope.launch {
+            val result = destinationRepository.fetchPoiDetails(placeId)
+            result.onSuccess { details ->
+                poiDetails = details.destination
+                poiPhotos = details.photos
+            }
+            result.onFailure { e ->
+                Log.e("HomeScreen", "Failed to load POI details", e)
+            }
+            poiLoading = false
+        }
+    }
+
     LocationPermissionHandler(
         onPermissionGranted = {
             hasPermission = true
@@ -336,14 +398,17 @@ fun HomeScreen(
                 // Composing GoogleMap before that yields a blank map with
                 // no tiles and no my-location layer, so gate it here.
                 if (navigationInitState is NavigationInitState.Ready) {
-                    map(
-                        currentLocation,
-                        recenterTrigger,
-                        selectedDestination,
-                        previewRoutes,
-                        selectedRoute?.id,
-                        { routeId -> viewModel.selectRoute(routeId) }
-                    )
+                map(
+                    currentLocation,
+                    recenterTrigger,
+                    selectedDestination,
+                    previewRoutes,
+                    selectedRoute?.id,
+                    { routeId -> viewModel.selectRoute(routeId) },
+                    ::onPoiClicked,
+                    satelliteEnabled,
+                    darkStyleEnabled
+                )
                 } else {
                     MapPlaceholder(
                         message = when (navigationInitState) {
@@ -404,12 +469,20 @@ fun HomeScreen(
                 ) {
                     MapControlButton(
                         icon = Icons.Filled.Layers,
-                        contentDescription = "Map layers"
+                        contentDescription = "Map layers",
+                        active = satelliteEnabled,
+                        onClick = {
+                            satelliteEnabled = !satelliteEnabled
+                            if (satelliteEnabled) {
+                                darkStyleEnabled = false
+                            }
+                        }
                     )
 
                     MapControlButton(
                         icon = Icons.Filled.MyLocation,
                         contentDescription = "Recenter on my location",
+                        active = currentLocation != null,
                         onClick = {
                             if (permGranted) {
                                 if (isLocationEnabled(context)) {
@@ -426,7 +499,14 @@ fun HomeScreen(
 
                     MapControlButton(
                         icon = Icons.Filled.DarkMode,
-                        contentDescription = "Dark mode toggle"
+                        contentDescription = "Dark mode toggle",
+                        active = darkStyleEnabled,
+                        onClick = {
+                            darkStyleEnabled = !darkStyleEnabled
+                            if (darkStyleEnabled) {
+                                satelliteEnabled = false
+                            }
+                        }
                     )
                 }
 
@@ -478,6 +558,28 @@ fun HomeScreen(
                 }
             }
 
+            if (poiSheetVisible) {
+                PoiDetailsSheet(
+                    name = poiDetails?.name ?: "",
+                    rating = poiDetails?.rating,
+                    ratingsTotal = poiDetails?.userRatingsTotal,
+                    address = poiDetails?.address ?: "",
+                    phoneNumber = poiDetails?.phoneNumber,
+                    photos = poiPhotos,
+                    isLoading = poiLoading,
+                    onNavigate = {
+                        val details = poiDetails ?: return@PoiDetailsSheet
+                        viewModel.selectDestination(details)
+                        viewModel.confirmDestination()
+                        viewModel.requestRoutePreview(
+                            originLatitude = currentLocation?.latitude,
+                            originLongitude = currentLocation?.longitude
+                        )
+                    },
+                    onDismiss = { poiSheetVisible = false }
+                )
+            }
+
             if (selectedDestination is SelectedDestinationState.Selected) {
                 val dest = (selectedDestination as SelectedDestinationState.Selected).destination
                 DestinationBottomSheet(
@@ -497,12 +599,23 @@ fun HomeScreen(
                 )
             }
 
+            val previewSessionActive = sessionState is NavigationSessionState.Active ||
+                sessionState is NavigationSessionState.Starting ||
+                sessionState is NavigationSessionState.Rerouting ||
+                sessionState is NavigationSessionState.OffRoute ||
+                sessionState is NavigationSessionState.Interrupted
+
+            if (selectedDestination is SelectedDestinationState.Confirmed && !previewSessionActive) {
+                LaunchedEffect(selectedDestination) {
+                    if (selectedDestination is SelectedDestinationState.Confirmed) {
+                        previewSheetVisible = true
+                    }
+                }
+            }
+
             if (selectedDestination is SelectedDestinationState.Confirmed &&
-                sessionState !is NavigationSessionState.Active &&
-                sessionState !is NavigationSessionState.Starting &&
-                sessionState !is NavigationSessionState.Rerouting &&
-                sessionState !is NavigationSessionState.OffRoute &&
-                sessionState !is NavigationSessionState.Interrupted
+                !previewSessionActive &&
+                previewSheetVisible
             ) {
                 val dest = (selectedDestination as SelectedDestinationState.Confirmed).destination
                 RoutePreviewSheet(
@@ -514,11 +627,55 @@ fun HomeScreen(
                         sessionCoordinator.startNavigation(dest, route)
                         onStartNavigation(route)
                     },
-                    onDismiss = {
-                        viewModel.clearDestination()
-                        searchQuery = ""
-                    }
+                    // Dismissing only hides the sheet; the destination and
+                    // routes stay on the map, ready to be brought back.
+                    onDismiss = { previewSheetVisible = false }
                 )
+            } else if (selectedDestination is SelectedDestinationState.Confirmed &&
+                !previewSessionActive &&
+                routePreviewState is RoutePreviewState.Available
+            ) {
+                // Sheet is hidden: floating pill at the bottom to reopen it,
+                // plus an explicit clear, so the selection is never lost by
+                // accident.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 28.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Choose route",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .clickable { previewSheetVisible = true }
+                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                        )
+                        IconButton(
+                            onClick = {
+                                viewModel.clearDestination()
+                                viewModel.clearRoutePreview()
+                                searchQuery = ""
+                                searchState = DestinationSearchState.Idle
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Clear destination and routes",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
             }
 
             val activeSession = when (val session = sessionState) {
@@ -628,6 +785,7 @@ private fun HomeTopBar(
 private fun MapControlButton(
     icon: ImageVector,
     contentDescription: String,
+    active: Boolean = false,
     onClick: () -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
@@ -637,7 +795,7 @@ private fun MapControlButton(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(colors.tertiary)
+            .background(if (active) colors.primary else colors.tertiary)
     ) {
         Icon(
             imageVector = icon,
@@ -666,6 +824,6 @@ private fun HomeScreenPreview() {
     HomeScreen(
         navController = rememberNavController(),
         locationProvider = PreviewLocationProvider,
-        map = { _, _, _, _, _, _ -> }
+        map = { _, _, _, _, _, _, _, _, _ -> }
     )
 }

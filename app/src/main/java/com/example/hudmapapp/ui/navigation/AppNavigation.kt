@@ -13,7 +13,6 @@ import com.example.hudmapapp.HudMapApplication
 import com.example.hudmapapp.navigation.NavigationSessionCoordinator
 import com.example.hudmapapp.ui.screens.hudScreen.HUDScreen
 import com.example.hudmapapp.ui.screens.homeScreen.HomeScreen
-import com.example.hudmapapp.ui.screens.hudScreen.MirroredHUDScreen
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen1
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen2
 import com.example.hudmapapp.ui.screens.introductionScreens.IntroductionScreen3
@@ -81,17 +80,6 @@ fun AppNavigation() {
 
         composable<AppRoute.HUD> {
             HUDScreen(
-                navController = navController,
-                sessionState = sessionState,
-                navigationState = navigationState,
-                onStop = { sessionCoordinator.stopNavigation() },
-                onResume = { sessionCoordinator.resume() },
-                onRetry = { sessionCoordinator.retryStart() }
-            )
-        }
-
-        composable<AppRoute.MirroredHUD>{
-            MirroredHUDScreen(
                 navController = navController,
                 sessionState = sessionState,
                 navigationState = navigationState,

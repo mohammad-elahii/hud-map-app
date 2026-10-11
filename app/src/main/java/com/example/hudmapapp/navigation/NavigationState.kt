@@ -14,6 +14,7 @@ enum class ManeuverType {
     FORK,
     MERGE,
     ROUNDABOUT,
+    ROUNDABOUT_EXIT,
     FERRY,
     NAME_CHANGE,
     DESTINATION,

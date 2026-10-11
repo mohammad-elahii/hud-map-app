@@ -1,24 +1,28 @@
 package com.example.hudmapapp.ui.screens.homeScreen
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
+/**
+ * Full-screen loading state shown while the Navigation SDK navigator has not
+ * finished initializing (terms pending, permission pending, initializing, or
+ * an SDK error), i.e. while the map cannot be mounted.
+ */
 @Composable
 internal fun MapPlaceholder(
     message: String? = null,
@@ -26,56 +30,27 @@ internal fun MapPlaceholder(
 ) {
     val colors = MaterialTheme.colorScheme
 
-    Box(
-        modifier = modifier.background(
-            colors.surfaceContainerLowest
-        ),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = modifier.background(colors.surfaceContainerLowest),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Canvas(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val step = 48.dp.toPx()
-
-            var x = 0f
-            while (x < size.width) {
-                drawLine(
-                    color = colors.outlineVariant,
-                    start = Offset(x, 0f),
-                    end = Offset(x, size.height),
-                    strokeWidth = 1.dp.toPx()
-                )
-                x += step
-            }
-
-            var y = 0f
-            while (y < size.height) {
-                drawLine(
-                    color = colors.outlineVariant,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 1.dp.toPx()
-                )
-                y += step
-            }
-        }
-
-        Icon(
-            imageVector = Icons.Filled.LocationOn,
-            contentDescription = "Current location placeholder",
-            tint = colors.primary,
-            modifier = Modifier.size(40.dp)
+        CircularProgressIndicator(
+            modifier = Modifier.size(36.dp),
+            strokeWidth = 3.dp,
+            color = colors.primary
         )
 
         if (message != null) {
+            Spacer(modifier = Modifier.height(14.dp))
             Text(
                 text = message,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 32.dp, vertical = 8.dp)
+                    .padding(horizontal = 32.dp)
             )
         }
     }

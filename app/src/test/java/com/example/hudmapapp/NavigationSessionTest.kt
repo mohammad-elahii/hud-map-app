@@ -134,7 +134,6 @@ private class FakeNavigatorAdapter(
         feedStopCalls++
     }
 
-    override fun startSimulator(speedMultiplier: Float): Boolean = true
 
     fun arrivalListenerCount() = arrivalListeners.size
 

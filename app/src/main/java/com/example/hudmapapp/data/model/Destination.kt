@@ -7,5 +7,6 @@ data class Destination(
     val latitude: Double,
     val longitude: Double,
     val rating: Float? = null,
-    val userRatingsTotal: Int? = null
+    val userRatingsTotal: Int? = null,
+    val phoneNumber: String? = null
 )

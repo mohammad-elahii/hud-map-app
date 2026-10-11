@@ -36,16 +36,3 @@ fun fakeGuidance(
     remainingDurationSeconds = remainingDurationSeconds,
     routeChanged = routeChanged
 )
-
-fun fakeNavigationState(
-    status: GuidanceStatus = GuidanceStatus.ACTIVE,
-    instruction: String = "Turn left onto Main St",
-    distanceToManeuverMeters: Int? = 300
-): NavigationState = applyGuidance(
-    NavigationState(status = status),
-    fakeGuidance(
-        instruction = instruction,
-        distanceToManeuverMeters = distanceToManeuverMeters
-    ),
-    status = status
-)

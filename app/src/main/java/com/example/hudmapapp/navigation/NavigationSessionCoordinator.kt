@@ -147,6 +147,9 @@ class NavigationSessionCoordinator(
                 return@setDestinations
             }
             logger.debug("navigation session #$sequence active")
+            if (!provided.startTurnByTurnService()) {
+                logger.warn("turn-by-turn service registration failed; HUD will show totals only")
+            }
             _sessionState.value = NavigationSessionState.Active(destination, route)
             _navigationState.value = applyGuidance(
                 NavigationState(status = GuidanceStatus.ACTIVE),
@@ -157,12 +160,6 @@ class NavigationSessionCoordinator(
             }
         }
     }
-
-    fun startSimulator(speedMultiplier: Float = 5f): Boolean {
-        val target = adapter ?: return false
-        return target.startSimulator(speedMultiplier)
-    }
-
     private fun onFeedTick(sequence: Long) {
         if (sequence != sessionSequence) return
         val current = _sessionState.value

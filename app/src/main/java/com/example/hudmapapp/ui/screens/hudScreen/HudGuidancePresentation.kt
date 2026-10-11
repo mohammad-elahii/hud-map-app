@@ -24,6 +24,7 @@ fun rotationForManeuver(type: ManeuverType): Float {
         ManeuverType.FORK,
         ManeuverType.MERGE,
         ManeuverType.ROUNDABOUT,
+        ManeuverType.ROUNDABOUT_EXIT,
         ManeuverType.FERRY,
         ManeuverType.NAME_CHANGE,
         ManeuverType.DESTINATION,
