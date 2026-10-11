@@ -123,7 +123,6 @@ private class InitFakeAdapter(
 
     override fun stopGuidanceFeed() {}
 
-
     fun listenerCount() = arrivals.size + routeChanges.size + progress.size + reroutes.size
 }
 

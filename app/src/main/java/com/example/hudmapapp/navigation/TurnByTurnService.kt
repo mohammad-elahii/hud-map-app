@@ -11,13 +11,6 @@ import android.os.Messenger
 import android.os.Process
 import com.google.android.libraries.mapsplatform.turnbyturn.TurnByTurnManager
 
-/**
- * Receives turn-by-turn NavInfo messages forwarded by the Navigation SDK
- * after [Navigator.registerServiceForNavUpdates] binds to it. Each update is
- * written to [TurnByTurnNavStore]; the guidance feed loop maps it into
- * NavigationState for the HUD. Same process as the app, so no IPC payload
- * copying beyond the SDK's own bundle round-trip.
- */
 class TurnByTurnService : Service() {
 
     private lateinit var incomingMessenger: Messenger

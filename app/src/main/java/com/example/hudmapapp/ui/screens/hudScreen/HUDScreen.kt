@@ -77,18 +77,6 @@ import com.example.hudmapapp.ui.theme.components.HudButton
 
 private const val TAG = "HUDScreen"
 
-/**
- * Distraction-free HUD navigation display.
- *
- * Fed app-owned [NavigationState] from the shared session coordinator (see
- * AppNavigation): this screen never touches Navigation SDK types. Every
- * session state renders a defined variant driven by [hudContentFor], using
- * the same [userMessageFor]/[recoveryActionFor] strings as the Home banner.
- *
- * The actual navigation visuals live in [HUDNavigationLayer] so that
- * [MirroredHUDScreen] (issue #18) can reuse the exact same content,
- * flipped, instead of duplicating it.
- */
 @Composable
 fun HUDScreen(
     navController: NavController,
@@ -98,8 +86,7 @@ fun HUDScreen(
     onResume: () -> Unit = {},
     onRetry: () -> Unit = {}
 ) {
-    // The HUD is a windshield display: landscape only while this screen is
-    // on top, restored to the system default when leaving.
+
     val activity = LocalContext.current as? Activity
     DisposableEffect(Unit) {
         activity?.requestedOrientation =
@@ -110,7 +97,6 @@ fun HUDScreen(
         }
     }
 
-    // Maximum display brightness for the whole HUD visit, restored on exit.
     DisposableEffect(Unit) {
         val window = activity?.window
         val attrs = window?.attributes
@@ -129,9 +115,6 @@ fun HUDScreen(
         }
     }
 
-    // Windshield mirroring happens in place: the guidance layer flips
-    // geometrically (double-flip through the glass reads correctly); close
-    // and mirror controls stay outside the flipped layer.
     var mirrored by remember { mutableStateOf(false) }
 
     Box(
@@ -169,9 +152,6 @@ fun HUDScreen(
                 .padding(20.dp)
         )
 
-        // Mirrored presentation toggle (in place, no separate screen). A
-        // plain, unmirrored text pill so it never gets second-guessed as
-        // part of the navigation instruction itself.
         MirrorEntryButton(
             label = if (mirrored) "Unmirror" else "Mirror",
             onClick = { mirrored = !mirrored },
@@ -216,12 +196,12 @@ internal fun HUDNavigationLayer(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: remaining distance to the next maneuver.
+
             Column(
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Small preview of the maneuver AFTER the current turn.
+
                 state.nextManeuver?.let { next ->
                     val nextRotation = rotationForManeuver(next.type)
                     ManeuverGlyph(
@@ -250,7 +230,6 @@ internal fun HUDNavigationLayer(
                 )
             }
 
-            // Center: CURRENT maneuver arrow and instruction text.
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -292,7 +271,6 @@ internal fun HUDNavigationLayer(
                 }
             }
 
-            // Right: ETA and remaining time.
             Column(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -412,10 +390,9 @@ private fun GradientIcon(
             )
             .drawWithCache {
                 onDrawWithContent {
-                    // Draw the arrow into the offscreen layer.
+
                     drawContent()
 
-                    // Apply the gradient only to the existing arrow pixels.
                     drawRect(
                         brush = gradient,
                         blendMode = BlendMode.SrcIn
@@ -435,16 +412,14 @@ private fun ManeuverGlyph(
 ) {
     val iconResId = rememberManeuverIconResId(type)
     if (iconResId != null) {
-        // Custom icon from res/drawable — artwork already includes the
-        // direction, so no rotation is applied.
+
         Image(
             painter = painterResource(iconResId),
             contentDescription = contentDescription,
             modifier = modifier
         )
     } else {
-        // Drawn fallbacks until the icon set is added: roundabout glyph or
-        // the rotating gradient arrow.
+
         if ((type == ManeuverType.ROUNDABOUT || type == ManeuverType.ROUNDABOUT_EXIT) &&
             roundaboutExit != null
         ) {
@@ -462,12 +437,6 @@ private fun ManeuverGlyph(
     }
 }
 
-/**
- * Roundabout glyph: ring with an entry stem at the bottom and the exit arm
- * drawn at the driver's counterclockwise exit position (right-hand traffic):
- * exit 1 → 30° (upper right), exit 2 → straight ahead (90°), and so on in
- * 60° steps. Rotation is baked into the drawing.
- */
 @Composable
 private fun RoundaboutExitGlyph(
     exitNumber: Int,
@@ -483,7 +452,6 @@ private fun RoundaboutExitGlyph(
         val cy = size.height / 2
         val ringRadius = size.minDimension * 0.26f
 
-        // Ring
         drawCircle(
             color = white,
             radius = ringRadius,
@@ -491,7 +459,6 @@ private fun RoundaboutExitGlyph(
             style = Stroke(width = stroke)
         )
 
-        // Entry stem from the bottom edge into the ring.
         drawLine(
             color = white,
             start = Offset(cx, size.height - stroke / 2),
@@ -511,7 +478,6 @@ private fun RoundaboutExitGlyph(
             strokeWidth = stroke * 0.8f
         )
 
-        // Exit arm at the driver's counterclockwise exit position.
         val exit = exitNumber.coerceIn(1, 5)
         val angleDeg = 30.0 + (exit - 1) * 60.0
         val angleRad = Math.toRadians(angleDeg)
@@ -529,8 +495,6 @@ private fun RoundaboutExitGlyph(
         val tipDy = dirY
         drawLine(color = white, start = armStart, end = tip, strokeWidth = stroke)
 
-        // Arrowhead at the arm tip: two wings rotated ±25° around the arm
-        // direction, drawn backwards from `tip`.
         val wingAngle = (25.0 * Math.PI / 180.0)
         val cosW = kotlin.math.cos(wingAngle).toFloat()
         val sinW = kotlin.math.sin(wingAngle).toFloat()
@@ -566,7 +530,6 @@ private fun DrawScope.drawCarGlyph(
     val bodyHeight = size.height * 0.55f
     val bodyTop = size.height - bodyHeight
 
-    // Body
     drawRoundRect(
         color = color,
         topLeft = Offset(0f, bodyTop),
@@ -577,7 +540,6 @@ private fun DrawScope.drawCarGlyph(
         )
     )
 
-    // Cabin
     drawRoundRect(
         color = color,
         topLeft = Offset(
@@ -594,7 +556,6 @@ private fun DrawScope.drawCarGlyph(
         )
     )
 
-    // Wheels
     val wheelRadius = bodyHeight * 0.32f
 
     drawCircle(
@@ -616,7 +577,6 @@ private fun DrawScope.drawCarGlyph(
     )
 }
 
-/** Shared circular icon button style used for both HUD screens' exit controls. */
 @Composable
 internal fun HUDIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -918,10 +878,6 @@ internal fun previewState(
     )
 }
 
-/**
- * Defined no-session fallback: shown when the HUD is opened with no active
- * navigation (Idle / Stopped) instead of a blank screen or stale guidance.
- */
 @Composable
 internal fun HudIdleFallback(
     onBackToMap: () -> Unit,
@@ -951,11 +907,6 @@ internal fun HudIdleFallback(
     }
 }
 
-/**
- * Shared session-state switch for HUD and MirroredHUD. Rerouting, off-route,
- * and interruption render the last live guidance snapshot so values never
- * tear mid-transition; the coordinator resumes live values on Active.
- */
 @Composable
 internal fun HudSessionContent(
     sessionState: NavigationSessionState,
@@ -978,8 +929,6 @@ internal fun HudSessionContent(
         }
     }
 
-    // Windshield parity: only live guidance mirrors. The Idle fallback stays
-    // readable without reflection; see MirroredHUDScreen.
     val guidanceModifier = if (mirrorGuidance) {
         modifier.graphicsLayer(scaleX = -1f)
     } else {

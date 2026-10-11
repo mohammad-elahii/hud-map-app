@@ -136,7 +136,6 @@ private class GuidanceFakeAdapter(
         lastFeedCallback = null
     }
 
-
     fun fireFeedTick() {
         if (!feedRunning) return
         feedTicks++

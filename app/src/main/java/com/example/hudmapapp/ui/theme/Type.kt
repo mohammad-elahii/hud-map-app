@@ -8,7 +8,6 @@ import androidx.compose.ui.unit.sp
 import com.example.hudmapapp.R
 import androidx.compose.material3.Typography
 
-
 val Typography: Typography
     get() = Typography(
         displayLarge = TextStyle(
@@ -26,7 +25,6 @@ val Typography: Typography
             fontWeight = FontWeight.W800,
             fontSize = 28.sp,
         ),
-
 
         headlineMedium = TextStyle(
             fontFamily = nunitoFamily,

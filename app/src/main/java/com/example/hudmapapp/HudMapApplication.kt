@@ -24,10 +24,7 @@ class HudMapApplication : Application() {
             FusedLocationUpdateSource(applicationContext)
         )
         navigationManager = NavigationManager()
-        // The Navigation SDK ships its own copy of the Maps SDK classes, and
-        // those classes only finish initializing once the navigator is ready.
-        // Kick off navigator init at app start so the map can mount as soon
-        // as possible instead of racing it from HomeScreen.
+
         navigationManager.initialize(this)
     }
 }

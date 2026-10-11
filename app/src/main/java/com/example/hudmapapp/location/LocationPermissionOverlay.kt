@@ -31,16 +31,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.ui.theme.components.HudButton
 
-/**
- * Shows a non-blocking status banner when location is in a waiting or error state.
- * Displayed at the bottom of the map so the user can still interact with the map.
- *
- * @param state The current location state.
- * @param onRetry Called when the user taps retry.
- * @param onOpenSettings Called when the user taps "Open Settings".
- * @param onDismiss Called when the user dismisses the banner.
- * @param modifier Modifier for the root composable.
- */
 @Composable
 fun LocationStatusBanner(
     state: LocationState,
@@ -85,8 +75,8 @@ fun LocationStatusBanner(
             showRetry = true,
             showSettings = false
         )
-        is LocationState.PermissionRequired -> return // handled by overlay, not banner
-        is LocationState.Available -> return       // nothing to show
+        is LocationState.PermissionRequired -> return
+        is LocationState.Available -> return
     }
 
     Box(
@@ -177,10 +167,6 @@ private data class BannerConfig(
     val showSettings: Boolean
 )
 
-/**
- * Full-screen overlay for permission-blocked states.
- * Shown on top of everything when location cannot proceed at all.
- */
 @Composable
 fun LocationBlockOverlay(
     reason: LocationBlockReason,

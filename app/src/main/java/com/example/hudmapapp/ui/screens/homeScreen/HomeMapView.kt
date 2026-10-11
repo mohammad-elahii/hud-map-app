@@ -73,8 +73,6 @@ private const val SelectedRouteZIndex = 100f
 private const val AlternativeRouteBaseZIndex = 10f
 private const val AlternativeRouteZIndexStep = 10f
 
-// The selected route is drawn as consecutive chunks colored along
-// MainGradient (Polyline only supports flat colors).
 private const val RouteGradientChunks = 24
 
 private fun gradientArgbAt(t: Float): Int {
@@ -96,15 +94,8 @@ private fun gradientArgbAt(t: Float): Int {
     )
 }
 
-// One physical tap fires the polyline click listener once per OVERLAPPING
-// polyline (alternative routes share road segments), so callbacks are
-// collected for this long before a single selection decision is made.
 private const val PolylineClickWindowMs = 60L
 
-/**
- * Collects the click callbacks of a single tap gesture and hands the whole
- * set to [decide] once the gesture window has closed.
- */
 private class PolylineClickGate {
     private val handler = Handler(Looper.getMainLooper())
     private var clicked = mutableListOf<Polyline>()
@@ -126,21 +117,12 @@ private class PolylineClickGate {
 private val AlternativeRouteColor = 0xFF9E9E9E.toInt()
 private const val CameraAnimationDurationMs = 600
 
-/**
- * Possible map failure modes.
- */
 sealed class MapError {
     data object None : MapError()
     data class InitializationFailed(val message: String = "Map failed to load") : MapError()
     data class NetworkUnavailable(val message: String = "No internet connection. Map data cannot be loaded.") : MapError()
 }
 
-/**
- * The Navigation SDK ships its own copy of the Maps SDK classes and replaces
- * the standalone Maps SDK entirely, so the home screen renders through the
- * bundled MapView, which behaves exactly like a normal Google map. The HUD
- * screen is a headless guidance display and hosts no map at all.
- */
 @Composable
 internal fun HomeMapView(
     currentLocation: AppLocation?,
@@ -192,8 +174,6 @@ internal fun HomeMapView(
         selectedRoute?.let { add(it) }
     }
 
-    // Mirrors the effective selection (including the first-route fallback)
-    // so the click gate can exclude the already-selected route.
     LaunchedEffect(selectedRoute?.id) {
         effectiveSelectedRouteId.value = selectedRoute?.id
     }
@@ -209,10 +189,7 @@ internal fun HomeMapView(
             ).apply {
                 onCreate(null as Bundle?)
                 mapView = this
-                // Do NOT forward onStart/onResume here: registering the
-                // lifecycle observer below makes LifecycleRegistry dispatch
-                // ON_START/ON_RESUME to sync it with the current activity
-                // state, and NavView enforces strict call ordering.
+
                 getMapAsync(
                     OnMapReadyCallback { readyMap ->
                         Log.d(TAG, "GoogleMap ready")
@@ -277,7 +254,7 @@ internal fun HomeMapView(
                 Lifecycle.Event.ON_RESUME -> mapView?.onResume()
                 Lifecycle.Event.ON_PAUSE -> mapView?.onPause()
                 Lifecycle.Event.ON_STOP -> mapView?.onStop()
-                else -> { /* no-op */ }
+                else -> {  }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -297,8 +274,6 @@ internal fun HomeMapView(
         context.resources.openRawResource(R.raw.map_style_dark).readBytes().decodeToString()
     }
 
-    // Satellite and the dark vector style are mutually exclusive: custom
-    // styling only applies to the vector base map, never to satellite tiles.
     LaunchedEffect(satelliteEnabled, darkStyleEnabled, googleMap) {
         val map = googleMap ?: return@LaunchedEffect
         Log.d(TAG, "mapType satellite=$satelliteEnabled darkStyle=$darkStyleEnabled")
@@ -337,9 +312,6 @@ internal fun HomeMapView(
         }
     }
 
-    // Center the camera on the user's position once, when the first fix
-    // arrives (or when the map is (re)created after a fix is already known).
-    // Later fixes leave the camera alone; the recenter button handles that.
     LaunchedEffect(hasUserLocation, googleMap) {
         val map = googleMap ?: return@LaunchedEffect
         val location = currentLocation ?: return@LaunchedEffect
@@ -367,10 +339,7 @@ internal fun HomeMapView(
             if (points.size < 2) return@forEach
             val isSelected = route.id == selectedRoute?.id
             if (isSelected) {
-                // Gradient route: consecutive overlapping chunks, each
-                // colored by its position along MainGradient. Adjacent
-                // chunks share their boundary point so the stroke stays
-                // visually continuous.
+
                 val chunkSize = maxOf(1, (points.size + RouteGradientChunks - 1) / RouteGradientChunks)
                 var start = 0
                 while (start < points.size - 1) {
@@ -388,9 +357,7 @@ internal fun HomeMapView(
                     start += chunkSize
                 }
             } else {
-                // Distinct z per alternative so "topmost drawn" is well
-                // defined when the click gate has to pick between overlapped
-                // routes.
+
                 val zIndex =
                     AlternativeRouteBaseZIndex + alternativeIndex++ * AlternativeRouteZIndexStep
                 Log.d(TAG, "Adding polyline for route ${route.id} (selected=false, zIndex=$zIndex, ${points.size} points)")
@@ -459,9 +426,6 @@ internal fun HomeMapView(
     }
 }
 
-/**
- * Lightweight overlay shown when the Google Map fails to load.
- */
 @Composable
 private fun MapErrorOverlay(
     message: String,
