@@ -2,7 +2,6 @@ package com.example.hudmapapp.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Primary palette
 val SkyBlue = Color(0xFF38BDF8)
 val Blue = Color(0xFF60A5FA)
 val Purple = Color(0xFFA78BFA)

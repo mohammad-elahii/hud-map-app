@@ -134,7 +134,6 @@ private class FakeNavigatorAdapter(
         feedStopCalls++
     }
 
-
     fun arrivalListenerCount() = arrivalListeners.size
 
     fun progressListenerCount() = progressListeners.size

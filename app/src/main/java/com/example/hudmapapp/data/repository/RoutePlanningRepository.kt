@@ -254,8 +254,7 @@ class RoutesApiDataSource(
             )
             val routeToken = routeObject["routeToken"]?.jsonPrimitive?.contentOrNull
             if (encodedPolyline.isBlank()) return@mapIndexedNotNull null
-            // routeLabels is only "DEFAULT_ROUTE"/"ALTERNATIVE_ROUTE", so it
-            // is not unique across alternatives; index-based ids are.
+
             RoutePreview(
                 id = "route-$index",
                 polylinePoints = decodePolyline(encodedPolyline),

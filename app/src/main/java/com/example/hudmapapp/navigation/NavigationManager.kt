@@ -44,9 +44,7 @@ class NavigationManager {
 
             override fun onError(errorCode: Int) {
                 if (errorCode == NavigationApi.ErrorCode.LOCATION_PERMISSION_MISSING) {
-                    // Permission is requested asynchronously by the UI; go back
-                    // to Uninitialized so initialize() is retried once the
-                    // grant lands instead of being stuck in Error forever.
+
                     Log.w("HudMapNav", "getNavigator: location permission missing, will retry after grant")
                     setState(NavigationInitState.Uninitialized)
                 } else {

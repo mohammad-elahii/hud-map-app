@@ -133,23 +133,18 @@ fun HomeScreen(
     var dismissBanner by remember { mutableStateOf(false) }
     var networkAvailable by remember { mutableStateOf(isNetworkAvailable(context)) }
 
-    // Search state
     var searchQuery by remember { mutableStateOf("") }
     var searchState by remember { mutableStateOf<DestinationSearchState>(DestinationSearchState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var searchJob by remember { mutableStateOf<Job?>(null) }
 
-    // Map POI (tapped place) sheet state
     var poiSheetVisible by remember { mutableStateOf(false) }
-    // Dismissible without losing the selection: dismiss only hides the
-    // sheet; clearing is an explicit action on the reopen pill.
+
     var previewSheetVisible by remember { mutableStateOf(false) }
     var poiLoading by remember { mutableStateOf(false) }
     var poiDetails by remember { mutableStateOf<Destination?>(null) }
     var poiPhotos by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
 
-    // Map display toggles: satellite and the dark vector style are mutually
-    // exclusive (styling never applies to satellite tiles).
     var satelliteEnabled by remember { mutableStateOf(false) }
     var darkStyleEnabled by remember { mutableStateOf(false) }
 
@@ -172,10 +167,6 @@ fun HomeScreen(
         navigationManager.initialize(context.applicationContext as HudMapApplication)
     }
 
-    // Official Navigation SDK Terms & Conditions gate: show the SDK-owned
-    // dialog once when terms are unaccepted. The SDK persists acceptance
-    // itself; on accept we retry navigator init, on decline the map stays
-    // usable and the init banner below explains guidance is unavailable.
     LaunchedEffect(navigationInitState) {
         if (navigationInitState is NavigationInitState.TermsNotAccepted && !termsDialogShown) {
             termsDialogShown = true
@@ -219,12 +210,6 @@ fun HomeScreen(
 
     var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
 
-    // ---------------------------------------------------------------
-    // Lifecycle-aware start/stop
-    //
-    // START  → check permission + GPS → start updates
-    // STOP   → stop updates
-    // ---------------------------------------------------------------
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -237,7 +222,7 @@ fun HomeScreen(
                 Lifecycle.Event.ON_STOP -> {
                     locationProvider.stopUpdates()
                 }
-                else -> { /* no-op */ }
+                else -> {  }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -247,7 +232,6 @@ fun HomeScreen(
         }
     }
 
-    // Also re-check on permission change (e.g. user grants in-dialog)
     LaunchedEffect(hasPermission) {
         if (hasPermission && isLocationEnabled(context)) {
             locationProvider.startUpdates()
@@ -276,7 +260,7 @@ fun HomeScreen(
 
         searchState = DestinationSearchState.Searching
         searchJob = coroutineScope.launch {
-            delay(300) // Debounce
+            delay(300)
 
             val biasLat = currentLocation?.latitude
             val biasLng = currentLocation?.longitude
@@ -320,9 +304,7 @@ fun HomeScreen(
     }
 
     fun onPoiClicked(placeId: String, name: String, latitude: Double, longitude: Double) {
-        // While a destination is chosen or route previews are being compared,
-        // tapping the map (even on a POI) must not wipe the selection — the
-        // user is inspecting the routes. POI handling resumes once cleared.
+
         val selectionActive = selectedDestination is SelectedDestinationState.Selected ||
             selectedDestination is SelectedDestinationState.Confirmed
         val routePreviewActive = routePreviewState is RoutePreviewState.Available ||
@@ -371,9 +353,7 @@ fun HomeScreen(
 
         LaunchedEffect(permGranted) {
             hasPermission = permGranted
-            // getNavigator() fails with LOCATION_PERMISSION_MISSING (and
-            // NavigationManager resets to Uninitialized) when called before
-            // the grant, so retry navigator init as soon as we have it.
+
             if (permGranted) {
                 navigationManager.initialize(context.applicationContext as HudMapApplication)
             }
@@ -393,10 +373,6 @@ fun HomeScreen(
                     else -> emptyList()
                 }
 
-                // The Navigation SDK bundles its own Maps SDK build whose
-                // MapView only initializes after the navigator is ready.
-                // Composing GoogleMap before that yields a blank map with
-                // no tiles and no my-location layer, so gate it here.
                 if (navigationInitState is NavigationInitState.Ready) {
                 map(
                     currentLocation,
@@ -532,7 +508,7 @@ fun HomeScreen(
                                     .fillMaxWidth()
                             )
                         }
-                        else -> { /* no banner needed */ }
+                        else -> {  }
                     }
                 }
 
@@ -627,17 +603,14 @@ fun HomeScreen(
                         sessionCoordinator.startNavigation(dest, route)
                         onStartNavigation(route)
                     },
-                    // Dismissing only hides the sheet; the destination and
-                    // routes stay on the map, ready to be brought back.
+
                     onDismiss = { previewSheetVisible = false }
                 )
             } else if (selectedDestination is SelectedDestinationState.Confirmed &&
                 !previewSessionActive &&
                 routePreviewState is RoutePreviewState.Available
             ) {
-                // Sheet is hidden: floating pill at the bottom to reopen it,
-                // plus an explicit clear, so the selection is never lost by
-                // accident.
+
                 Box(modifier = Modifier.fillMaxSize()) {
                     Row(
                         modifier = Modifier

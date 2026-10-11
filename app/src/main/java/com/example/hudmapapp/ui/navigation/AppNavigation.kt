@@ -26,13 +26,6 @@ fun AppNavigation() {
     val context = LocalContext.current
     val application = context.applicationContext as HudMapApplication
 
-    // #59: one coordinator shared by Home, HUD, and MirroredHUD. Activity-scoped
-    // (not back-stack-entry-scoped) so navigating Home <-> HUD, or rotating the
-    // device, neither kills nor duplicates the session. SDK init stays in
-    // NavigationManager; this only shares the already-tested session holder.
-    // Background/foreground grace handling stays in HomeScreen's observer: the
-    // NavHost caps off-screen entries at STARTED, so Home -> HUD is a pause, not
-    // a stop, and never trips the 30 s background timer by itself.
     val sessionCoordinator: NavigationSessionCoordinator = viewModel(
         viewModelStoreOwner = context as ComponentActivity,
         factory = NavigationSessionCoordinator.Factory(application.navigationManager)

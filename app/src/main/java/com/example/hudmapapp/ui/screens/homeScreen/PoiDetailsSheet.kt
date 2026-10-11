@@ -39,11 +39,6 @@ import androidx.compose.ui.unit.dp
 import com.example.hudmapapp.ui.theme.components.HudButton
 import kotlinx.coroutines.launch
 
-/**
- * Modal sheet for a place tapped on the map. Top to bottom: name, rating,
- * address, phone number, pictures (when available) and a navigate button
- * that starts route calculation to the place.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PoiDetailsSheet(

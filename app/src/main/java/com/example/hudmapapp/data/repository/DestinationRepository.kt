@@ -117,11 +117,6 @@ class DestinationRepository(
         }
     }
 
-    /**
-     * Full details for the map POI bottom sheet: name, rating, address,
-     * phone number and up to [maxPhotos] downloaded photos. Photo failures
-     * are non-fatal; the sheet just renders fewer images.
-     */
     suspend fun fetchPoiDetails(
         placeId: String,
         maxPhotos: Int = 3
@@ -166,7 +161,7 @@ class DestinationRepository(
                         .build()
                     placesClient.fetchPhoto(photoRequest).await().bitmap?.let(photos::add)
                 } catch (_: Exception) {
-                    // Photo is optional; skip failures.
+
                 }
             }
 

@@ -18,11 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/**
- * Full-screen loading state shown while the Navigation SDK navigator has not
- * finished initializing (terms pending, permission pending, initializing, or
- * an SDK error), i.e. while the map cannot be mounted.
- */
 @Composable
 internal fun MapPlaceholder(
     message: String? = null,

@@ -46,10 +46,6 @@ interface NavigatorAdapter {
 
     fun isGuidanceRunning(): Boolean
 
-    /**
-     * Registers the turn-by-turn service with the Navigation SDK so the HUD
-     * receives NavInfo (current/next step, distances) during guidance.
-     */
     fun startTurnByTurnService(): Boolean = false
 
     fun stopTurnByTurnService() {}
@@ -179,8 +175,7 @@ class SdkNavigatorAdapter(
 
     override fun startTurnByTurnService(): Boolean {
         return try {
-            // generatedStepImagesType and displayMetrics are REQUIRED by the
-            // builder; we render our own arrows so no step images are needed.
+
             val options = com.google.android.libraries.navigation.NavigationUpdatesOptions
                 .builder()
                 .setNumNextStepsToPreview(1)
@@ -190,8 +185,7 @@ class SdkNavigatorAdapter(
                 )
                 .setDisplayMetrics(android.util.DisplayMetrics())
                 .build()
-            // Must be the applicationId, NOT the service class's Java package
-            // (the service lives in a sub-package).
+
             val registered = navigator.registerServiceForNavUpdates(
                 com.example.hudmapapp.BuildConfig.APPLICATION_ID,
                 TurnByTurnService::class.java.name,
