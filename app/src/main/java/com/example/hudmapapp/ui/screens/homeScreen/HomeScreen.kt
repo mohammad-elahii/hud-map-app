@@ -1,0 +1,802 @@
+package com.example.hudmapapp.ui.screens.homeScreen
+
+import android.content.Intent
+import android.provider.Settings
+import android.util.Log
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
+import androidx.navigation.compose.rememberNavController
+import com.example.hudmapapp.location.AppLocation
+import com.example.hudmapapp.HudMapApplication
+import com.example.hudmapapp.navigation.NavigationInitState
+import com.example.hudmapapp.navigation.NavigationSessionCoordinator
+import com.example.hudmapapp.navigation.NavigationSessionState
+import com.example.hudmapapp.data.model.Destination
+import com.example.hudmapapp.data.model.DestinationSearchState
+import com.example.hudmapapp.data.model.RoutePreview
+import com.example.hudmapapp.data.model.RoutePreviewState
+import com.example.hudmapapp.data.model.SelectedDestinationState
+import com.example.hudmapapp.data.repository.DestinationRepository
+import com.example.hudmapapp.location.LocationBlockReason
+import com.example.hudmapapp.location.LocationPermissionHandler
+import com.example.hudmapapp.location.LocationState
+import com.example.hudmapapp.location.LocationStatusBanner
+import com.example.hudmapapp.location.LocationBlockOverlay
+import com.example.hudmapapp.location.LocationProvider
+import com.example.hudmapapp.location.hasLocationPermission
+import com.example.hudmapapp.location.isLocationEnabled
+import com.example.hudmapapp.location.isNetworkAvailable
+import com.example.hudmapapp.ui.navigation.AppRoute
+import com.example.hudmapapp.ui.theme.DeepPurple30
+import com.example.hudmapapp.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+@Composable
+fun HomeScreen(
+    navController: NavController,
+    locationProvider: LocationProvider,
+    viewModel: HomeViewModel = viewModel(
+        factory = HomeViewModel.Factory(
+            LocalContext.current.applicationContext,
+            BuildConfig.MAPS_API_KEY
+        )
+    ),
+    sessionCoordinator: NavigationSessionCoordinator = viewModel(
+        factory = NavigationSessionCoordinator.Factory(
+            (LocalContext.current.applicationContext as HudMapApplication).navigationManager
+        )
+    ),
+    map: @Composable (
+        AppLocation?,
+        Int,
+        SelectedDestinationState,
+        List<RoutePreview>,
+        String?,
+        (String) -> Unit,
+        (String, String, Double, Double) -> Unit,
+        Boolean,
+        Boolean
+    ) -> Unit = { loc, trigger, selected, routes, selectedRouteId, onRouteSelected, onPoiClick, satellite, darkStyle ->
+        HomeMapView(
+            currentLocation = loc,
+            recenterTrigger = trigger,
+            selectedDestination = selected,
+            routePreviews = routes,
+            selectedRouteId = selectedRouteId,
+            onRouteSelected = onRouteSelected,
+            onPoiClick = onPoiClick,
+            satelliteEnabled = satellite,
+            darkStyleEnabled = darkStyle
+        )
+    },
+    onStartNavigation: (RoutePreview) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val selectedDestination by viewModel.selectedDestination.collectAsState()
+    val routePreviewState by viewModel.routePreviewState.collectAsState()
+    val selectedRoute by viewModel.selectedRoute.collectAsState()
+
+    var overlayReason by remember { mutableStateOf<LocationBlockReason?>(null) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+    var dismissBanner by remember { mutableStateOf(false) }
+    var networkAvailable by remember { mutableStateOf(isNetworkAvailable(context)) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var searchState by remember { mutableStateOf<DestinationSearchState>(DestinationSearchState.Idle) }
+    val coroutineScope = rememberCoroutineScope()
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    var poiSheetVisible by remember { mutableStateOf(false) }
+
+    var previewSheetVisible by remember { mutableStateOf(false) }
+    var poiLoading by remember { mutableStateOf(false) }
+    var poiDetails by remember { mutableStateOf<Destination?>(null) }
+    var poiPhotos by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
+
+    var satelliteEnabled by remember { mutableStateOf(false) }
+    var darkStyleEnabled by remember { mutableStateOf(false) }
+
+    val destinationRepository: DestinationRepository = remember {
+        DestinationRepository.create(context.applicationContext, BuildConfig.MAPS_API_KEY)
+    }
+
+    val navigationManager = remember {
+        (context.applicationContext as HudMapApplication).navigationManager
+    }
+
+    val navigationInitState by navigationManager.initState.collectAsState()
+
+    val sessionState by sessionCoordinator.sessionState.collectAsState()
+    val navigationState by sessionCoordinator.navigationState.collectAsState()
+
+    var termsDialogShown by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        navigationManager.initialize(context.applicationContext as HudMapApplication)
+    }
+
+    LaunchedEffect(navigationInitState) {
+        if (navigationInitState is NavigationInitState.TermsNotAccepted && !termsDialogShown) {
+            termsDialogShown = true
+            val activity = context as? android.app.Activity
+            if (activity != null) {
+                com.google.android.libraries.navigation.NavigationApi.showTermsAndConditionsDialog(
+                    activity,
+                    "Navigation Terms",
+                    object : com.google.android.libraries.navigation.NavigationApi.OnTermsResponseListener {
+                        override fun onTermsResponse(accepted: Boolean) {
+                            if (accepted) {
+                                navigationManager.notifyTermsAccepted(
+                                    context.applicationContext as HudMapApplication
+                                )
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                sessionCoordinator.onAppBackgrounded()
+            } else if (event == Lifecycle.Event.ON_START) {
+                sessionCoordinator.onAppForegrounded()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val currentLocation by locationProvider.locationUpdates
+        .collectAsState(initial = null)
+
+    val locationState by locationProvider.locationState.collectAsState()
+
+    var hasPermission by remember { mutableStateOf(hasLocationPermission(context)) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    hasPermission = hasLocationPermission(context)
+                    if (hasPermission && isLocationEnabled(context)) {
+                        locationProvider.startUpdates()
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    locationProvider.stopUpdates()
+                }
+                else -> {  }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            locationProvider.stopUpdates()
+        }
+    }
+
+    LaunchedEffect(hasPermission) {
+        if (hasPermission && isLocationEnabled(context)) {
+            locationProvider.startUpdates()
+        }
+    }
+
+    fun openLocationSettings() {
+        val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        context.startActivity(intent)
+    }
+
+    fun retryLocation() {
+        dismissBanner = false
+        networkAvailable = isNetworkAvailable(context)
+        if (hasPermission && isLocationEnabled(context) && networkAvailable) {
+            locationProvider.startUpdates()
+        }
+    }
+
+    fun searchDestinations(query: String) {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            searchState = DestinationSearchState.Idle
+            return
+        }
+
+        searchState = DestinationSearchState.Searching
+        searchJob = coroutineScope.launch {
+            delay(300)
+
+            val biasLat = currentLocation?.latitude
+            val biasLng = currentLocation?.longitude
+
+            val result = destinationRepository.searchDestinations(
+                query = query,
+                biasLatitude = biasLat,
+                biasLongitude = biasLng
+            )
+
+            result.fold(
+                onSuccess = { destinations ->
+                    searchState = if (destinations.isEmpty()) {
+                        DestinationSearchState.Empty
+                    } else {
+                        DestinationSearchState.Results(destinations)
+                    }
+                },
+                onFailure = { e ->
+                    if (e is CancellationException) throw e
+                    searchState = DestinationSearchState.Error(
+                        e.message ?: "Search failed"
+                    )
+                }
+            )
+        }
+    }
+
+    fun onDestinationSelected(destination: Destination) {
+        viewModel.clearRoutePreview()
+        viewModel.selectDestination(destination)
+        searchQuery = destination.name
+        searchState = DestinationSearchState.Idle
+
+        coroutineScope.launch {
+            val result = destinationRepository.fetchPlaceDetails(destination.placeId)
+            result.onSuccess { detailed ->
+                viewModel.changeDestination(detailed)
+            }
+        }
+    }
+
+    fun onPoiClicked(placeId: String, name: String, latitude: Double, longitude: Double) {
+
+        val selectionActive = selectedDestination is SelectedDestinationState.Selected ||
+            selectedDestination is SelectedDestinationState.Confirmed
+        val routePreviewActive = routePreviewState is RoutePreviewState.Available ||
+            routePreviewState is RoutePreviewState.Loading
+        if (selectionActive || routePreviewActive) return
+
+        viewModel.clearRoutePreview()
+        viewModel.clearDestination()
+        searchQuery = ""
+        searchState = DestinationSearchState.Idle
+
+        poiSheetVisible = true
+        poiLoading = true
+        poiDetails = Destination(
+            placeId = placeId,
+            name = name,
+            address = "",
+            latitude = latitude,
+            longitude = longitude
+        )
+        poiPhotos = emptyList()
+
+        coroutineScope.launch {
+            val result = destinationRepository.fetchPoiDetails(placeId)
+            result.onSuccess { details ->
+                poiDetails = details.destination
+                poiPhotos = details.photos
+            }
+            result.onFailure { e ->
+                Log.e("HomeScreen", "Failed to load POI details", e)
+            }
+            poiLoading = false
+        }
+    }
+
+    LocationPermissionHandler(
+        onPermissionGranted = {
+            hasPermission = true
+            if (!isLocationEnabled(context)) {
+                overlayReason = LocationBlockReason.GpsDisabled
+            } else {
+                locationProvider.startUpdates()
+            }
+        }
+    ) { permGranted, permissionActions ->
+
+        LaunchedEffect(permGranted) {
+            hasPermission = permGranted
+
+            if (permGranted) {
+                navigationManager.initialize(context.applicationContext as HudMapApplication)
+            }
+        }
+
+        Scaffold { innerPadding ->
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+
+                val previewRoutes = when (routePreviewState) {
+                    is RoutePreviewState.Available ->
+                        (routePreviewState as RoutePreviewState.Available).routes
+                    else -> emptyList()
+                }
+
+                if (navigationInitState is NavigationInitState.Ready) {
+                map(
+                    currentLocation,
+                    recenterTrigger,
+                    selectedDestination,
+                    previewRoutes,
+                    selectedRoute?.id,
+                    { routeId -> viewModel.selectRoute(routeId) },
+                    ::onPoiClicked,
+                    satelliteEnabled,
+                    darkStyleEnabled
+                )
+                } else {
+                    MapPlaceholder(
+                        message = when (navigationInitState) {
+                            is NavigationInitState.Error ->
+                                "Navigation SDK failed to initialize (code " +
+                                    (navigationInitState as NavigationInitState.Error).errorCode +
+                                    "). Map unavailable."
+                            is NavigationInitState.TermsNotAccepted ->
+                                "Accept the navigation terms to view the map."
+                            else -> "Preparing map…"
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                HomeTopBar(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth(),
+                    onSettingsClick = {
+                        navController.navigate(AppRoute.HUD)
+                    }
+                )
+
+                DestinationSearchBar(
+                    query = searchQuery,
+                    onQueryChange = { query ->
+                        searchQuery = query
+                        searchDestinations(query)
+                    },
+                    onClear = {
+                        searchQuery = ""
+                        searchState = DestinationSearchState.Idle
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 100.dp)
+                )
+
+                DestinationSearchResults(
+                    searchState = searchState,
+                    onDestinationClick = { destination ->
+                        onDestinationSelected(destination)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 160.dp)
+                )
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(
+                            end = 20.dp,
+                            bottom = 160.dp
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MapControlButton(
+                        icon = Icons.Filled.Layers,
+                        contentDescription = "Map layers",
+                        active = satelliteEnabled,
+                        onClick = {
+                            satelliteEnabled = !satelliteEnabled
+                            if (satelliteEnabled) {
+                                darkStyleEnabled = false
+                            }
+                        }
+                    )
+
+                    MapControlButton(
+                        icon = Icons.Filled.MyLocation,
+                        contentDescription = "Recenter on my location",
+                        active = currentLocation != null,
+                        onClick = {
+                            if (permGranted) {
+                                if (isLocationEnabled(context)) {
+                                    recenterTrigger++
+                                } else {
+                                    overlayReason = LocationBlockReason.GpsDisabled
+                                }
+                            } else {
+                                overlayReason = LocationBlockReason.PermissionDenied
+                                permissionActions.request()
+                            }
+                        }
+                    )
+
+                    MapControlButton(
+                        icon = Icons.Filled.DarkMode,
+                        contentDescription = "Dark mode toggle",
+                        active = darkStyleEnabled,
+                        onClick = {
+                            darkStyleEnabled = !darkStyleEnabled
+                            if (darkStyleEnabled) {
+                                satelliteEnabled = false
+                            }
+                        }
+                    )
+                }
+
+                if (!dismissBanner && permGranted && isLocationEnabled(context)) {
+                    val bannerState = if (!networkAvailable) {
+                        LocationState.NetworkUnavailable
+                    } else {
+                        locationState
+                    }
+
+                    when (bannerState) {
+                        is LocationState.WaitingForFix,
+                        is LocationState.Unavailable,
+                        is LocationState.Error,
+                        is LocationState.NetworkUnavailable -> {
+                            LocationStatusBanner(
+                                state = bannerState,
+                                onRetry = { retryLocation() },
+                                onOpenSettings = { openLocationSettings() },
+                                onDismiss = { dismissBanner = true },
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                            )
+                        }
+                        else -> {  }
+                    }
+                }
+
+                if (overlayReason != null) {
+                    LocationBlockOverlay(
+                        reason = overlayReason!!,
+                        onRequestPermission = {
+                            overlayReason = null
+                            permissionActions.request()
+                        },
+                        onOpenSettings = {
+                            overlayReason = null
+                            permissionActions.openSettings()
+                        },
+                        onOpenLocationSettings = {
+                            overlayReason = null
+                            openLocationSettings()
+                        },
+                        onDismiss = {
+                            overlayReason = null
+                        }
+                    )
+                }
+            }
+
+            if (poiSheetVisible) {
+                PoiDetailsSheet(
+                    name = poiDetails?.name ?: "",
+                    rating = poiDetails?.rating,
+                    ratingsTotal = poiDetails?.userRatingsTotal,
+                    address = poiDetails?.address ?: "",
+                    phoneNumber = poiDetails?.phoneNumber,
+                    photos = poiPhotos,
+                    isLoading = poiLoading,
+                    onNavigate = {
+                        val details = poiDetails ?: return@PoiDetailsSheet
+                        viewModel.selectDestination(details)
+                        viewModel.confirmDestination()
+                        viewModel.requestRoutePreview(
+                            originLatitude = currentLocation?.latitude,
+                            originLongitude = currentLocation?.longitude
+                        )
+                    },
+                    onDismiss = { poiSheetVisible = false }
+                )
+            }
+
+            if (selectedDestination is SelectedDestinationState.Selected) {
+                val dest = (selectedDestination as SelectedDestinationState.Selected).destination
+                DestinationBottomSheet(
+                    destination = dest,
+                    onConfirm = {
+                        viewModel.confirmDestination()
+                        viewModel.requestRoutePreview(
+                            originLatitude = currentLocation?.latitude,
+                            originLongitude = currentLocation?.longitude
+                        )
+                    },
+                    onClear = {
+                        viewModel.clearDestination()
+                        searchQuery = ""
+                    },
+                    onDismiss = { viewModel.clearDestination() }
+                )
+            }
+
+            val previewSessionActive = sessionState is NavigationSessionState.Active ||
+                sessionState is NavigationSessionState.Starting ||
+                sessionState is NavigationSessionState.Rerouting ||
+                sessionState is NavigationSessionState.OffRoute ||
+                sessionState is NavigationSessionState.Interrupted
+
+            if (selectedDestination is SelectedDestinationState.Confirmed && !previewSessionActive) {
+                LaunchedEffect(selectedDestination) {
+                    if (selectedDestination is SelectedDestinationState.Confirmed) {
+                        previewSheetVisible = true
+                    }
+                }
+            }
+
+            if (selectedDestination is SelectedDestinationState.Confirmed &&
+                !previewSessionActive &&
+                previewSheetVisible
+            ) {
+                val dest = (selectedDestination as SelectedDestinationState.Confirmed).destination
+                RoutePreviewSheet(
+                    destination = dest,
+                    routePreviewState = routePreviewState,
+                    selectedRoute = selectedRoute,
+                    onRouteSelected = { routeId -> viewModel.selectRoute(routeId) },
+                    onStartNavigation = { route ->
+                        sessionCoordinator.startNavigation(dest, route)
+                        onStartNavigation(route)
+                    },
+
+                    onDismiss = { previewSheetVisible = false }
+                )
+            } else if (selectedDestination is SelectedDestinationState.Confirmed &&
+                !previewSessionActive &&
+                routePreviewState is RoutePreviewState.Available
+            ) {
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 28.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Choose route",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .clickable { previewSheetVisible = true }
+                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                        )
+                        IconButton(
+                            onClick = {
+                                viewModel.clearDestination()
+                                viewModel.clearRoutePreview()
+                                searchQuery = ""
+                                searchState = DestinationSearchState.Idle
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "Clear destination and routes",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+
+            val activeSession = when (val session = sessionState) {
+                is NavigationSessionState.Active -> session
+                is NavigationSessionState.Starting -> session
+                is NavigationSessionState.Rerouting -> session
+                is NavigationSessionState.OffRoute -> session
+                is NavigationSessionState.Interrupted -> session
+                else -> null
+            }
+            if (activeSession != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    NavigationSessionBanner(
+                        sessionState = activeSession,
+                        navigationState = navigationState,
+                        onStop = {
+                            sessionCoordinator.stopNavigation()
+                            viewModel.clearDestination()
+                            searchQuery = ""
+                        },
+                        onRetry = { sessionCoordinator.retryStart() },
+                        onResume = { sessionCoordinator.resume() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            val sessionError = sessionState as? NavigationSessionState.Error
+            if (sessionError != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    NavigationSessionBanner(
+                        sessionState = sessionError,
+                        onStop = {
+                            sessionCoordinator.stopNavigation()
+                            viewModel.clearDestination()
+                            searchQuery = ""
+                        },
+                        onRetry = { sessionCoordinator.retryStart() },
+                        onResume = { sessionCoordinator.resume() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeTopBar(
+    modifier: Modifier = Modifier,
+    onSettingsClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val typography = MaterialTheme.typography
+
+    Row(
+        modifier = modifier
+            .padding(
+                horizontal = 20.dp,
+                vertical = 16.dp
+            )
+            .background(
+                color = DeepPurple30,
+                shape = RoundedCornerShape(50)
+            ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Good morning",
+                style = typography.labelMedium,
+                color = colors.onSurfaceVariant
+            )
+
+            Text(
+                text = "Where to?",
+                style = typography.labelLarge,
+                color = colors.onSurface
+            )
+        }
+
+        IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier
+                .size(50.dp)
+                .clip(CircleShape)
+                .background(colors.primary)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "Settings",
+                tint = colors.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun MapControlButton(
+    icon: ImageVector,
+    contentDescription: String,
+    active: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    val colors = MaterialTheme.colorScheme
+
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(if (active) colors.primary else colors.tertiary)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = colors.surface
+        )
+    }
+}
+
+private object PreviewLocationProvider : LocationProvider {
+    override val locationUpdates: SharedFlow<AppLocation> = MutableSharedFlow()
+    override val locationState: StateFlow<LocationState> =
+        MutableStateFlow(LocationState.WaitingForFix)
+    override val isTracking: StateFlow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun getLastLocation(): AppLocation? = null
+
+    override fun startUpdates() = Unit
+
+    override fun stopUpdates() = Unit
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun HomeScreenPreview() {
+    HomeScreen(
+        navController = rememberNavController(),
+        locationProvider = PreviewLocationProvider,
+        map = { _, _, _, _, _, _, _, _, _ -> }
+    )
+}
