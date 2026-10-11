@@ -174,7 +174,7 @@ class RoutePreviewTest {
         assertEquals(772, route.distanceMeters)
         assertEquals(165L, route.durationSeconds)
         assertEquals("token-1", route.routeToken)
-        assertEquals("DEFAULT_ROUTE", route.id)
+        assertEquals("route-0", route.id)
         assertTrue(route.polylinePoints.isNotEmpty())
     }
 

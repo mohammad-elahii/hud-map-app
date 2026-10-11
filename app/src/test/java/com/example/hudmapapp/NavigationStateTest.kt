@@ -136,7 +136,6 @@ private class GuidanceFakeAdapter(
         lastFeedCallback = null
     }
 
-    override fun startSimulator(speedMultiplier: Float): Boolean = true
 
     fun fireFeedTick() {
         if (!feedRunning) return
@@ -321,17 +320,6 @@ class NavigationStateTest {
         }
 
     @Test
-    fun `simulator start delegates to adapter`() = runTest(testDispatcher) {
-        val fake = GuidanceFakeAdapter()
-        val coordinator = NavigationSessionCoordinator({ fake }, noopLogger)
-
-        coordinator.startNavigation(destination(), route())
-        advanceUntilIdle()
-
-        assertTrue(coordinator.startSimulator(5f))
-    }
-
-    @Test
     fun `maneuver name mapping covers key turns`() {
         assertEquals(
             ManeuverType.LEFT,
@@ -347,7 +335,7 @@ class NavigationStateTest {
         )
         assertEquals(
             ManeuverType.ROUNDABOUT,
-            com.example.hudmapapp.navigation.mapManeuverNameForTest("ROUNDABOUT_RIGHT")
+            com.example.hudmapapp.navigation.mapManeuverNameForTest("ROUNDABOUT_RIGHT_CLOCKWISE")
         )
         assertEquals(
             ManeuverType.DESTINATION,

@@ -56,7 +56,9 @@ fun DestinationSearchBar(
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
-    autoFocus: Boolean = true
+    // No auto focus: the keyboard must not open by itself on entering the
+    // Home screen; it opens when the user taps the field.
+    autoFocus: Boolean = false
 ) {
     val colors = MaterialTheme.colorScheme
     val focusRequester = remember { FocusRequester() }

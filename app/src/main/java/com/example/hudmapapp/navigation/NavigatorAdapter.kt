@@ -1,5 +1,6 @@
 package com.example.hudmapapp.navigation
 
+import android.util.Log
 import com.example.hudmapapp.data.model.Destination
 import com.example.hudmapapp.data.model.RoutePreview
 import com.google.android.libraries.navigation.ArrivalEvent
@@ -41,11 +42,17 @@ interface NavigatorAdapter {
 
     fun stopGuidanceFeed()
 
-    fun startSimulator(speedMultiplier: Float = 5f): Boolean
-
     fun readGuidance(): GuidanceSnapshot?
 
     fun isGuidanceRunning(): Boolean
+
+    /**
+     * Registers the turn-by-turn service with the Navigation SDK so the HUD
+     * receives NavInfo (current/next step, distances) during guidance.
+     */
+    fun startTurnByTurnService(): Boolean = false
+
+    fun stopTurnByTurnService() {}
 }
 
 class SdkNavigatorAdapter(
@@ -150,27 +157,6 @@ class SdkNavigatorAdapter(
         stopTurnByTurnService()
     }
 
-    override fun startSimulator(speedMultiplier: Float): Boolean {
-        return try {
-            val options = com.google.android.libraries.navigation.SimulationOptions()
-                .speedMultiplier(speedMultiplier)
-            navigator.simulator.simulateLocationsAlongExistingRoute(options)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun stopSimulator() {
-        try {
-            val simulator = navigator.simulator
-            simulator.javaClass.methods
-                .firstOrNull { it.name == "stopSimulation" }
-                ?.invoke(simulator)
-        } catch (_: Exception) {
-        }
-    }
-
     override fun readGuidance(): GuidanceSnapshot? {
         readTurnByTurn()?.let { return it }
         return try {
@@ -191,47 +177,49 @@ class SdkNavigatorAdapter(
         }
     }
 
-    private var turnService: Any? = null
-
-    fun startTurnByTurnService(packageName: String, serviceName: String): Boolean {
+    override fun startTurnByTurnService(): Boolean {
         return try {
-            val optionsClass = Class.forName(
-                "com.google.android.libraries.navigation.NavigationUpdatesOptions"
+            // generatedStepImagesType and displayMetrics are REQUIRED by the
+            // builder; we render our own arrows so no step images are needed.
+            val options = com.google.android.libraries.navigation.NavigationUpdatesOptions
+                .builder()
+                .setNumNextStepsToPreview(1)
+                .setGeneratedStepImagesType(
+                    com.google.android.libraries.navigation.NavigationUpdatesOptions
+                        .GeneratedStepImagesType.NONE
+                )
+                .setDisplayMetrics(android.util.DisplayMetrics())
+                .build()
+            // Must be the applicationId, NOT the service class's Java package
+            // (the service lives in a sub-package).
+            val registered = navigator.registerServiceForNavUpdates(
+                com.example.hudmapapp.BuildConfig.APPLICATION_ID,
+                TurnByTurnService::class.java.name,
+                options
             )
-            val builderMethod = optionsClass.getMethod("builder")
-            val builder = builderMethod.invoke(null)
-            val builderClass = builder.javaClass
-            builderClass.getMethod("setNumNextStepsToPreview", Int::class.javaPrimitiveType)
-                .invoke(builder, 1)
-            val options = builderClass.getMethod("build").invoke(builder)
-            val method = navigator.javaClass.getMethod(
-                "registerServiceForNavUpdates",
-                String::class.java,
-                String::class.java,
-                optionsClass
-            )
-            turnServiceRegistered = method.invoke(navigator, packageName, serviceName, options) as? Boolean
-                ?: false
-            turnServiceRegistered
-        } catch (_: Exception) {
+            Log.d("HudMapNav", "registerServiceForNavUpdates -> $registered")
+            registered
+        } catch (e: Exception) {
+            Log.w("HudMapNav", "registerServiceForNavUpdates failed", e)
             false
         }
     }
 
-    private var turnServiceRegistered = false
-
-    fun stopTurnByTurnService() {
+    override fun stopTurnByTurnService() {
         if (!turnServiceRegistered) return
         try {
-            navigator.javaClass.getMethod("unregisterServiceForNavUpdates").invoke(navigator)
+            navigator.unregisterServiceForNavUpdates()
         } catch (_: Exception) {
         }
         turnServiceRegistered = false
+        TurnByTurnNavStore.clear()
     }
 
     private fun readTurnByTurn(): GuidanceSnapshot? {
-        return turnService?.let { mapNavInfo(it) }
+        return TurnByTurnNavStore.latest?.let { mapNavInfo(it) }
     }
+
+    private var turnServiceRegistered = false
 
     private var feedHandler: android.os.Handler? = null
     private var feedTask: Runnable? = null
